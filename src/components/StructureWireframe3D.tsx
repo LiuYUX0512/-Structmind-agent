@@ -233,16 +233,17 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
   }, [params.floors]);
 
   // 等轴测投影：3D 坐标 → 2D 屏幕坐标
+  // zoomOverride 传入 1 时用于计算"基准包围盒"（忽略用户缩放，保证 viewBox 自适应完整显示）
   const project = useMemo(() => {
     const baseScale = Math.min(
       240 / Math.max(geom.totalWidth, geom.totalDepth),
       200 / geom.totalHeight
     );
-    const scale = baseScale * zoom;
     const angleY = (rotateAngle * Math.PI) / 180;
     const tilt = 0.42;
 
-    return (x: number, y: number, z: number): [number, number] => {
+    return (x: number, y: number, z: number, zoomOverride?: number): [number, number] => {
+      const scale = baseScale * (zoomOverride ?? zoom);
       const cx = geom.totalWidth / 2;
       const cz = geom.totalDepth / 2;
       const px = x - cx;
@@ -921,9 +922,52 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
     );
   }
 
-  // 计算 viewBox
-  const vbSize = 320;
-  const vbHalf = vbSize / 2;
+  // ===== 动态自适应 viewBox =====
+  // 用 zoom=1 的基准投影计算模型实际包围盒（含标注点），加 padding；
+  // 再除以当前 zoom —— 放大看细节、缩小看全貌，任何楼层高度都完整显示
+  const pad = 30;
+  const bbox = useMemo(() => {
+    const ext = 1.2;
+    const pts: [number, number][] = [
+      project(-ext, 0, -ext, 1),
+      project(geom.totalWidth + ext, 0, -ext, 1),
+      project(geom.totalWidth + ext, 0, geom.totalDepth + ext, 1),
+      project(-ext, 0, geom.totalDepth + ext, 1),
+      project(-ext, geom.totalHeight, -ext, 1),
+      project(geom.totalWidth + ext, geom.totalHeight, -ext, 1),
+      project(geom.totalWidth + ext, geom.totalHeight, geom.totalDepth + ext, 1),
+      project(-ext, geom.totalHeight, geom.totalDepth + ext, 1),
+      // 高度标注线上下端点
+      project(geom.totalWidth + 0.5, geom.totalHeight, geom.totalDepth + 0.5, 1),
+      project(geom.totalWidth + 0.5, 0, geom.totalDepth + 0.5, 1),
+      // 底部加强区标注点
+      project(geom.totalWidth / 2, reinforceFloors * geom.floorHeight / 2, geom.totalDepth + 1, 1),
+    ];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const [x, y] of pts) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    // 兜底：任何情况下都不为空
+    if (!isFinite(minX) || !isFinite(minY)) {
+      return { x: -160, y: -135, w: 320, h: 320 };
+    }
+    return {
+      x: minX - pad,
+      y: minY - pad,
+      w: maxX - minX + pad * 2,
+      h: maxY - minY + pad * 2,
+    };
+  }, [project, geom, reinforceFloors]);
+
+  // 应用用户缩放：viewBox 尺寸缩小 = 放大显示（以中心为锚点）
+  const vbX = bbox.x + bbox.w * 0.5 - (bbox.w / zoom) * 0.5;
+  const vbY = bbox.y + bbox.h * 0.5 - (bbox.h / zoom) * 0.5;
+  const vbW = bbox.w / zoom;
+  const vbH = bbox.h / zoom;
+  const viewBoxStr = `${vbX.toFixed(2)} ${vbY.toFixed(2)} ${vbW.toFixed(2)} ${vbH.toFixed(2)}`;
 
   return (
     <div
@@ -951,7 +995,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       />
 
       <svg
-        viewBox={`${-vbHalf} ${-vbHalf + 25} ${vbSize} ${vbSize}`}
+        viewBox={viewBoxStr}
         className="relative h-full w-full"
         style={{ pointerEvents: 'none' }}
         preserveAspectRatio="xMidYMid meet"
@@ -961,7 +1005,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
             <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(30, 77, 123, 0.06)" strokeWidth="0.5" />
           </pattern>
         </defs>
-        <rect x={-vbHalf} y={-vbHalf + 25} width={vbSize} height={vbSize} fill="url(#grid-pattern-3d)" />
+        <rect x={bbox.x} y={bbox.y} width={bbox.w} height={bbox.h} fill="url(#grid-pattern-3d)" />
         {elements}
       </svg>
 
