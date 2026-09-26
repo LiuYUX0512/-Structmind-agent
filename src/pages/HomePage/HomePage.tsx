@@ -1802,7 +1802,7 @@ ${dis || '- （待补充）'}
          @media print {
            /* 隐藏应用主界面：用 display:none（不保留布局占位），避免打印出现大量空白页与
               visibility:hidden 元素背景的跨页渲染伪影（最右侧色片） */
-           .app-shell, #root > div:not(.print-only) {
+           .app-shell {
              display: none !important;
            }
            .print-only {
