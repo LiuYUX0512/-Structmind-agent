@@ -7,7 +7,9 @@
 // ============================================================
 import { scopedStorage } from '@lark-apaas/client-toolkit-lite';
 import { runAgentPipeline } from '../src/agent/pipeline';
-import { TOOL_REGISTRY } from '../src/agent/tools';
+import { TOOL_REGISTRY, executeToolByName } from '../src/agent/tools';
+import { resolveKnowledgeBasis } from '../src/data/code-knowledge';
+import { saveHistoryEntry, loadHistory, clearHistory, type IHistoryEntry } from '../src/data/project-history';
 import type { IProjectParams } from '../src/data/structure';
 
 // ---------- Mock LLM 工具 ----------
@@ -555,6 +557,92 @@ async function scenarioRetry() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+// ---------- 场景 7：规范知识库条文追溯（第 8 条意见落地验证） ----------
+async function scenarioKnowledge() {
+  console.log('\n===== 场景 7：规范知识库条文追溯 =====\n');
+  const checks: Array<[string, boolean, string]> = [];
+  const seismic = executeToolByName('check_seismic_requirements', {
+    systemId: 'frame',
+    params: { floors: 10, seismicIntensity: '8' },
+  });
+  const fire = executeToolByName('check_fire_requirements', {
+    systemId: 'steel',
+    floors: 20,
+    buildingType: 'factory',
+  });
+  const kb = (seismic as { knowledgeBasis?: unknown }).knowledgeBasis as Array<{ code: string; clause: string; title: string; text: string }> | undefined;
+  checks.push(['seismic 输出携带 knowledgeBasis', Array.isArray(kb) && kb.length > 0, String(kb?.length)]);
+  const codeOk = (kb ?? []).every((r) => r.code && r.clause && r.title && r.text);
+  checks.push(['每条条文含 规范号/条文号/标题/要旨', codeOk, `${(kb ?? []).length} 条`]);
+  const clauseOk = (kb ?? []).some((r) => r.clause.includes('表') || r.clause.includes('第'));
+  checks.push(['条文号格式可追溯', clauseOk, (kb ?? []).map((r) => r.clause).join(' / ')]);
+  const fireKb = (fire as { knowledgeBasis?: unknown }).knowledgeBasis as Array<{ code: string }> | undefined;
+  checks.push(['fire 输出携带知识库（钢结构防火条文）', Array.isArray(fireKb) && fireKb.length > 0 && (fireKb ?? []).some((r) => r.code.includes('GB 55037')), String(fireKb?.length)]);
+  // 通用条目不过滤：frame 应命中高度/位移角/剪重比等（appliesTo 含 frame 或通用）
+  const hasHeight = (kb ?? []).some((r) => r.title.includes('最大适用高度'));
+  checks.push(['frame 命中最大适用高度条文', hasHeight, 'GB/T 50011 表6.1.1']);
+  // 适用过滤：axial_ratio 只对剪力墙体系
+  const frameAxial = resolveKnowledgeBasis('frame', ['axial_ratio']);
+  const wallAxial = resolveKnowledgeBasis('shearwall', ['axial_ratio']);
+  checks.push(['appliesTo 过滤正确（轴压比仅墙系）', frameAxial.length === 0 && wallAxial.length > 0, `frame=${frameAxial.length}, shearwall=${wallAxial.length}`]);
+  // 判定本身仍带条文文本（原有 clauseText 不回归）
+  const seisChecks = (seismic as { checks?: Array<{ clauseText?: string }> }).checks ?? [];
+  checks.push(['校核判定仍带 clauseText（未回归）', seisChecks.some((c) => c.clauseText), `${seisChecks.length} 项`]);
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
+// ---------- 场景 8：工程历史版本（localStorage 注入式存储） ----------
+async function scenarioHistory() {
+  console.log('\n===== 场景 8：工程历史版本管理 =====\n');
+  const checks: Array<[string, boolean, string]> = [];
+  const mem = new Map<string, string>();
+  const storage = {
+    getItem: (k: string) => mem.get(k) ?? null,
+    setItem: (k: string, v: string) => { mem.set(k, v); },
+    removeItem: (k: string) => { mem.delete(k); },
+  };
+  const base: IHistoryEntry = {
+    id: 't',
+    timestamp: 0,
+    params: { buildingType: 'residential', floors: 8, area: 4000, structurePreference: 'any', seismicIntensity: '7', soilCategory: 'Ⅱ', geologyType: 'clay', mainSpan: 8, budget: 3500, windPressure: '0.4', snowPressure: '0.2', fortificationCategory: 'standard' },
+    recommended: { schemeId: 'frame', schemeName: '框架结构', overallScore: 88 },
+    ranking: [{ schemeId: 'frame', schemeName: '框架结构', score: 88 }],
+    codeChecks: {},
+    metrics: {},
+  };
+  // 保存 12 版 → 只留 10 版
+  let list: IHistoryEntry[] = [];
+  for (let i = 0; i < 12; i++) {
+    list = saveHistoryEntry({ ...base, id: String(i), timestamp: i, recommended: { ...base.recommended, overallScore: 80 + i } }, storage);
+  }
+  checks.push(['最多保留 10 版', list.length === 10, `${list.length} 版`]);
+  checks.push(['最新在前（第11版为最新）', list[0].id === '11', `head=${list[0].id}`]);
+  checks.push(['最旧被裁剪（第0/1版已淘汰）', !list.some((h) => h.id === '0' || h.id === '1'), list.map((h) => h.id).join(',')]);
+  // load 一致性
+  const loaded = loadHistory(storage);
+  checks.push(['loadHistory 与保存一致', loaded.length === 10 && loaded[0].id === '11', `${loaded.length} 版`]);
+  // 重复保存同 id 去重
+  list = saveHistoryEntry({ ...base, id: '11' }, storage);
+  checks.push(['同 id 重复保存去重', list.length === 10 && list.filter((h) => h.id === '11').length === 1, `${list.length} 版`]);
+  // 清空
+  clearHistory(storage);
+  checks.push(['clearHistory 清空', loadHistory(storage).length === 0, '0 版']);
+  // buildHistoryEntry 摘要正确
+  const entry = saveHistoryEntry({ ...base, id: 'x' }, storage)[0];
+  checks.push(['历史条目含推荐方案/得分', entry.recommended.schemeName === '框架结构' && entry.recommended.overallScore === 88, `${entry.recommended.schemeName} ${entry.recommended.overallScore}分`]);
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -567,10 +655,12 @@ const r3 = await scenarioShuffle();
 const r4 = await scenarioRetry();
 const r5 = await scenarioHitl();
 const r6 = await scenarioChiefStructured();
+const r7 = await scenarioKnowledge();
+const r8 = await scenarioHistory();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} ----`);
-if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok) {
-  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化输出');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

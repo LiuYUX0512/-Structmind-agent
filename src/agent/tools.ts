@@ -18,6 +18,7 @@ import {
   type IFoundationSuggestion,
 } from '@/data/structure';
 import { computeSchemeScore } from './scoring';
+import { resolveKnowledgeBasis } from '@/data/code-knowledge';
 
 /** 工具参数属性定义（JSON Schema 子集） */
 export interface IToolParamProperty {
@@ -165,6 +166,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         systemId,
         systemName: (STRUCTURE_SYSTEM_LIBRARY.find((s) => s.id === systemId)?.name) || systemId,
         height: calculateBuildingHeight(params.floors),
+        // 规范知识库条文依据（可追溯：每条判定可查到条文号 + 条文要旨）
+        knowledgeBasis: resolveKnowledgeBasis(systemId, ['max_height', 'drift', 'swr', 'period', 'axial_ratio', 'seismic_grade']),
         standards: result.standards,
         checks: result.checks.map((c) => ({
           name: c.name,
@@ -300,6 +303,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         buildingType,
         height,
         fireResistanceGrade,
+        // 规范知识库条文依据（可追溯：耐火等级 + 钢结构防火保护）
+        knowledgeBasis: resolveKnowledgeBasis(systemId, ['fire_grade', 'steel_fire']),
         codeBasis: ['GB 55037-2022《建筑防火通用规范》', 'GB 50016-2014（2018年版）《建筑设计防火规范》'],
         checks: fireChecks.map((c) => ({
           article: c.item,

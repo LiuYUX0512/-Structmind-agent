@@ -1,11 +1,14 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { capabilityClient, scopedStorage, logger } from '@lark-apaas/client-toolkit-lite';
 import { toast } from 'sonner';
-import { Download, Upload, AlertTriangle, Presentation, FileText, HelpCircle } from 'lucide-react';
+import { Download, Upload, AlertTriangle, Presentation, FileText, HelpCircle, History, GitCompareArrows } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { sortSchemesByRanking } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+} from '@/components/ui/sheet';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import ReportPrintView from '@/components/ReportPrintView';
 import StepNav from '@/components/StepNav';
@@ -47,6 +50,13 @@ import {
   type IThinkingStep,
   type IExtremeParamAlert,
 } from '@/data/structure';
+import {
+  loadHistory,
+  saveHistoryEntry,
+  clearHistory,
+  buildHistoryEntry,
+  type IHistoryEntry,
+} from '@/data/project-history';
 import {
   runAgentPipeline,
   type IHumanOverrides,
@@ -197,6 +207,10 @@ export default function HomePage() {
   const [optimizationResult, setOptimizationResult] = useState<IOptimizationResult | null>(null);
   const [visibleIteration, setVisibleIteration] = useState<number>(0); // 当前展示到第几轮
   const [paramsFormKey, setParamsFormKey] = useState(0); // 递增触发 ParamsSection 整体重挂载重置表单
+  // 工程历史版本（版本回溯 / 对比）
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<IHistoryEntry[]>([]);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
   const [isAutoOptimizing, setIsAutoOptimizing] = useState(false);
   const [optimizeSuggestions, setOptimizeSuggestions] = useState<ReturnType<typeof generateOptimizationSuggestions>>([]);
   const [presentationMode, setPresentationMode] = useState(false);
@@ -810,6 +824,11 @@ ${dis || '- （待补充）'}
           })),
           });
 
+        // 工程历史版本：保存本版参数+结果到 localStorage（最多 10 版）
+        if (result.recommended && result.recommended.schemeId) {
+          setHistoryList(saveHistoryEntry(buildHistoryEntry(params, result)));
+        }
+
         // 总工主动优化建议分析
         const topScheme = result.schemes.find((s) => s.id === result.recommended.schemeId);
         if (topScheme) {
@@ -973,6 +992,44 @@ ${dis || '- （待补充）'}
     },
     [agentConfig, calculateWeightedScores, generateSchemesFromParams]
   );
+
+  // 从历史版本重新开始：填回参数并重新生成
+  const handleRestartFromHistory = useCallback(
+    (entry: IHistoryEntry) => {
+      setProjectParams(entry.params);
+      setParamsFormKey((k) => k + 1);
+      setHistoryOpen(false);
+      setCompareIds([]);
+      doGenerate(entry.params, weights);
+    },
+    [weights, doGenerate]
+  );
+
+  const handleToggleCompare = useCallback((id: string) => {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1], id];
+      return [...prev, id];
+    });
+  }, []);
+
+  const handleClearHistory = useCallback(() => {
+    clearHistory();
+    setHistoryList([]);
+    setCompareIds([]);
+  }, []);
+
+  const handleOpenHistory = useCallback(() => {
+    setHistoryList(loadHistory());
+    setCompareIds([]);
+    setHistoryOpen(true);
+  }, []);
+
+  const formatHistoryTime = useCallback((ts: number) => {
+    const d = new Date(ts);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getMonth() + 1}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, []);
 
   const handleGenerate = useCallback(
     (params: IProjectParams, w: IWeightConfig, humanOverrides?: IHumanOverrides) => {
@@ -1497,12 +1554,110 @@ ${dis || '- （待补充）'}
                   <Upload className="h-3.5 w-3.5" />
                   导入工程
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleOpenHistory}
+                  className="gap-1.5 border-border/60 text-xs"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  历史版本
+                </Button>
               </div>
            </div>
            <p className="mt-4 text-center text-[11px] text-muted-foreground/60">
              第一届"海之子杯"AI 智能体挑战赛参赛作品 © 2026
            </p>
          </div>
+
+         {/* 工程历史版本抽屉 */}
+         <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+           <SheetContent className="w-[440px] overflow-y-auto sm:max-w-none" side="right">
+             <SheetHeader>
+               <SheetTitle className="flex items-center gap-2 text-sm">
+                 <History className="size-4 text-primary" />
+                 工程历史版本
+                 <span className="font-mono text-[10px] tracking-wider text-muted-foreground">
+                   PROJECT LOG · 本地保存
+                 </span>
+               </SheetTitle>
+               <SheetDescription className="text-xs">
+                 最近 {historyList.length > 0 ? historyList.length : 0} 版运行记录（localStorage 最多保留 10 版），支持对比与回溯
+               </SheetDescription>
+             </SheetHeader>
+             <div className="mt-4 space-y-2.5">
+               {historyList.length === 0 && (
+                 <p className="rounded-md border border-dashed border-border/60 p-4 text-center text-xs text-muted-foreground">
+                   暂无历史记录 —— 生成方案后会自动保存每一版
+                 </p>
+               )}
+               {historyList.map((h, i) => {
+                 const checked = compareIds.includes(h.id);
+                 return (
+                   <div
+                     key={h.id}
+                     className={`rounded-lg border p-3 transition-colors ${
+                       checked ? 'border-teal/60 bg-teal/[0.07]' : 'border-border/60 bg-card/70'
+                     }`}
+                   >
+                     <div className="flex items-center justify-between">
+                       <span className="font-mono text-[10px] tracking-wider text-muted-foreground">
+                         版本 #{historyList.length - i} · {formatHistoryTime(h.timestamp)}
+                       </span>
+                       <span className="text-[10px] font-medium text-teal">
+                         {h.recommended.overallScore} 分
+                       </span>
+                     </div>
+                     <div className="mt-1.5 text-sm font-medium text-foreground">
+                       推荐：{h.recommended.schemeName}
+                       <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                         {h.params.buildingType === 'residential' ? '住宅' : h.params.buildingType === 'school' ? '教学' : h.params.buildingType === 'factory' ? '厂房' : h.params.buildingType === 'office' ? '办公' : '大跨'} ·
+                         {h.params.floors}层 · {h.params.area}㎡ · {h.params.mainSpan}m跨
+                       </span>
+                     </div>
+                     <div className="mt-2 flex items-center gap-2">
+                       <Button
+                         variant={checked ? 'default' : 'outline'}
+                         size="sm"
+                         className="h-7 px-2 text-[11px]"
+                         onClick={() => handleToggleCompare(h.id)}
+                       >
+                         对比
+                       </Button>
+                       <Button
+                         variant="outline"
+                         size="sm"
+                         className="h-7 px-2 text-[11px]"
+                         onClick={() => handleRestartFromHistory(h)}
+                       >
+                         从此版本重新开始
+                       </Button>
+                     </div>
+                   </div>
+                 );
+               })}
+             </div>
+
+             {compareIds.length === 2 && (
+               <HistoryCompare
+                 list={historyList}
+                 compareIds={compareIds}
+                 formatTime={formatHistoryTime}
+               />
+             )}
+
+             {historyList.length > 0 && (
+               <Button
+                 variant="ghost"
+                 size="sm"
+                 className="mt-4 w-full text-xs text-destructive hover:text-destructive"
+                 onClick={handleClearHistory}
+               >
+                 清空历史记录
+               </Button>
+             )}
+           </SheetContent>
+         </Sheet>
 
          {/* 答辩 FAQ */}
          <div className="mx-auto mt-10 max-w-3xl px-6">
@@ -1668,3 +1823,73 @@ ${dis || '- （待补充）'}
      </>
    );
  }
+
+/** 两版历史对比面板（参数 diff + 推荐对比） */
+function HistoryCompare({
+  list,
+  compareIds,
+  formatTime,
+}: {
+  list: IHistoryEntry[];
+  compareIds: string[];
+  formatTime: (ts: number) => string;
+}) {
+  const [a, b] = [list.find((h) => h.id === compareIds[0]), list.find((h) => h.id === compareIds[1])];
+  if (!a || !b) return null;
+
+  const PARAM_LABELS: Record<string, string> = {
+    buildingType: '建筑类型',
+    floors: '层数',
+    area: '面积(㎡)',
+    mainSpan: '跨度(m)',
+    seismicIntensity: '设防烈度',
+    soilCategory: '场地土',
+    budget: '预算(万元)',
+  };
+  const paramsA = a.params as unknown as Record<string, unknown>;
+  const paramsB = b.params as unknown as Record<string, unknown>;
+  const diffRows = Object.keys(PARAM_LABELS)
+    .filter((k) => JSON.stringify(paramsA[k]) !== JSON.stringify(paramsB[k]))
+    .map((k) => ({ key: k, label: PARAM_LABELS[k], va: paramsA[k], vb: paramsB[k] }));
+
+  return (
+    <div className="mt-4 rounded-lg border border-primary/30 bg-primary/[0.04] p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+        <GitCompareArrows className="size-3.5 text-primary" />
+        版本对比
+        <span className="ml-auto font-mono text-[10px] font-normal text-muted-foreground">
+          {formatTime(a.timestamp)} ↔ {formatTime(b.timestamp)}
+        </span>
+      </div>
+      {diffRows.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">两版输入参数完全一致（仅结果差异）</p>
+      ) : (
+        <div className="space-y-1">
+          {diffRows.map((r) => (
+            <div key={r.key} className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="text-muted-foreground">{r.label}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-muted-foreground line-through decoration-rose-400/60">{String(r.va)}</span>
+                <span className="text-foreground font-medium">{String(r.vb)}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 space-y-1 border-t border-dashed border-border/50 pt-2 text-[11px]">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">推荐方案</span>
+          <span className="text-foreground">
+            {a.recommended.schemeName} → <strong className="text-primary">{b.recommended.schemeName}</strong>
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">综合得分</span>
+          <span className="text-foreground">
+            {a.recommended.overallScore} → <strong className="text-primary">{b.recommended.overallScore}</strong>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
