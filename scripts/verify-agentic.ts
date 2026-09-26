@@ -838,6 +838,18 @@ async function scenarioUiHealth() {
   const themeCss2 = readFileSync(resolve(root, 'src', 'tailwind-theme.css'), 'utf-8');
   checks.push(['执行图动画 CSS（流动/回退/呼吸）', themeCss2.includes('agent-flow-dash') && themeCss2.includes('agent-flow-rework-blink') && themeCss2.includes('agent-flow-active-pulse'), 'flow css ok']);
 
+  // 11d. 对战舞台 + 雷达扫光 + 造价大屏数字
+  const debateSrc = readFileSync(resolve(root, 'src', 'components', 'DebatePanel.tsx'), 'utf-8');
+  checks.push(['辩论卡 3D 翻转入场（rotateY+透视）', debateSrc.includes('rotateY: -28') && debateSrc.includes('rotateY: 28') && debateSrc.includes('transformPerspective'), '3d flip ok']);
+  checks.push(['仲裁锤 Gavel 居中', debateSrc.includes('Gavel') && debateSrc.includes('justify-center'), 'gavel ok']);
+
+  const cmpSrc = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'sections', 'ComparisonSection.tsx'), 'utf-8');
+  checks.push(['雷达 tooltip 维度数值 formatter', cmpSrc.includes("RADAR_DIMENSIONS.map((d, i)") && cmpSrc.includes('rows.join'), 'radar tooltip ok']);
+  checks.push(['雷达 hover 强调（线宽/顶点光晕）', cmpSrc.includes('emphasis: {') && cmpSrc.includes('shadowBlur'), 'radar emphasis ok']);
+  checks.push(['雷达极坐标网格增强', cmpSrc.includes("'rgba(15,76,129,0.28)'"), 'radar grid ok']);
+  checks.push(['造价大屏数字（CountUp+font-mono+色块）', cmpSrc.includes('CountUpOnView') && cmpSrc.includes('text-[52px]') && cmpSrc.includes('border-primary/25'), 'big cost ok']);
+  checks.push(['预算对比绿/红着色', cmpSrc.includes('低于预算') && cmpSrc.includes('超出预算'), 'budget color ok']);
+
   let pass = 0;
   for (const [name, ok, detail] of checks) {
     console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);

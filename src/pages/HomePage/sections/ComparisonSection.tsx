@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
+import CountUpOnView from '@/components/CountUpOnView';
 import type { EChartsOption } from 'echarts';
 import { motion } from 'framer-motion';
 import {
@@ -209,7 +210,19 @@ function ComparisonSection({
 
   const radarOption: EChartsOption = useMemo(
     () => ({
-      tooltip: { trigger: 'item', backgroundColor: CHART_SEMANTIC.tooltipBg, borderColor: 'rgba(15,76,129,0.2)', borderWidth: 1, textStyle: { color: CHART_SEMANTIC.text, fontSize: 12 } },
+      tooltip: {
+        trigger: 'item',
+        backgroundColor: CHART_SEMANTIC.tooltipBg,
+        borderColor: 'rgba(15,76,129,0.2)',
+        borderWidth: 1,
+        textStyle: { color: CHART_SEMANTIC.text, fontSize: 12 },
+        formatter: (p: unknown) => {
+          const pp = p as { name?: string; value?: number[]; marker?: string };
+          if (!pp || !Array.isArray(pp.value)) return '';
+          const rows = RADAR_DIMENSIONS.map((d, i) => `${d.label}：${pp.value?.[i]?.toFixed?.(1) ?? pp.value?.[i] ?? '—'}`);
+          return `<b>${pp.marker ?? ''} ${pp.name ?? ''}</b><br/>` + rows.join('<br/>');
+        },
+      },
       legend: {
         type: 'scroll',
         bottom: 8,
@@ -221,16 +234,16 @@ function ComparisonSection({
         indicator: RADAR_DIMENSIONS.map((d) => ({ name: d.label, max: d.max })),
         center: ['50%', '46%'],
         radius: '52%',
-        splitNumber: 4,
+        splitNumber: 5,
         axisName: {
           fontSize: 12,
           color: CHART_SEMANTIC.text,
           fontWeight: 500,
         },
         axisNameGap: 8,
-        splitLine: { lineStyle: { color: 'rgba(15,76,129,0.12)' } },
-        splitArea: { areaStyle: { color: ['rgba(15,76,129,0.01)', 'rgba(15,76,129,0.03)'] } },
-        axisLine: { lineStyle: { color: 'rgba(15,76,129,0.2)' } },
+        splitLine: { lineStyle: { color: 'rgba(15,76,129,0.16)' } },
+        splitArea: { areaStyle: { color: ['rgba(15,76,129,0.015)', 'rgba(15,76,129,0.045)'] } },
+        axisLine: { lineStyle: { color: 'rgba(15,76,129,0.28)' } },
       },
        series: [
          {
@@ -247,6 +260,11 @@ function ComparisonSection({
                areaStyle: { opacity: i === 0 ? 0.25 : 0.12 },
                lineStyle: { width: i === 0 ? 2.5 : 1.5, color },
                itemStyle: { color },
+               emphasis: {
+                 lineStyle: { width: 3.5, color },
+                 itemStyle: { color, borderColor: color, borderWidth: 2.5, shadowBlur: 12, shadowColor: 'rgba(15,76,129,0.35)' },
+                 areaStyle: { opacity: 0.4 },
+               },
              };
            }),
          },
@@ -774,11 +792,37 @@ function ComparisonSection({
                 </div>
                 <div className="h-10 w-px bg-amber/20" />
                 <div className="text-center">
-                  <div className="font-mono text-[9px] tracking-wider text-muted-foreground">造价</div>
-                  <div className="data-number text-2xl font-bold text-foreground">
-                    ¥{recommendedScheme.metrics.cost.toLocaleString()}
+                  <div className="font-mono text-[9px] tracking-wider text-muted-foreground">造价（元/㎡）</div>
+                  <div
+                    className={`data-number flex items-baseline justify-center gap-1 rounded-md border px-3 py-1.5 font-mono text-[52px] font-black leading-none md:text-[64px] ${
+                      projectParams?.budget
+                        ? recommendedScheme.metrics.cost <= projectParams.budget
+                          ? 'border-success/40 bg-success/10 text-success'
+                          : 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : 'border-primary/25 bg-primary/[0.06] text-foreground'
+                    }`}
+                  >
+                    <span className="self-start pt-1 text-lg font-semibold text-inherit opacity-80">¥</span>
+                    <CountUpOnView
+                      value={recommendedScheme.metrics.cost}
+                      duration={1000}
+                      className="tabular-nums tracking-tight"
+                    />
                   </div>
-                  <div className="text-[10px] text-muted-foreground">元/㎡</div>
+                  {projectParams?.budget ? (
+                    <div
+                      className={`mt-1 inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+                        recommendedScheme.metrics.cost <= projectParams.budget
+                          ? 'bg-success/15 text-success'
+                          : 'bg-destructive/15 text-destructive'
+                      }`}
+                    >
+                      {recommendedScheme.metrics.cost <= projectParams.budget ? '✓ 低于预算' : '✕ 超出预算'}
+                      <span className="opacity-70">预算 {projectParams.budget.toLocaleString()}</span>
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[10px] text-muted-foreground">未设预算约束</div>
+                  )}
                 </div>
               </div>
             </div>

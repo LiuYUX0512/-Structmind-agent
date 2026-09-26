@@ -6,7 +6,7 @@
 
 import { memo, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, PenTool, Scale, CheckCircle2, MessageSquareWarning, CornerDownRight } from 'lucide-react';
+import { AlertTriangle, PenTool, Gavel, CheckCircle2, MessageSquareWarning, CornerDownRight } from 'lucide-react';
 import type { IAgentActionLog } from '@/agent/types';
 import { cn } from '@/lib/utils';
 
@@ -145,9 +145,15 @@ const DebatePanel = memo(function DebatePanel({ logs, verdict }: DebatePanelProp
                       规范校核工程师 · Code Agent
                       {r.code.title && <span className="text-slate-400">（{r.code.title}）</span>}
                     </div>
-                    <div className="rounded-xl rounded-tl-sm border border-rose-200 bg-rose-50/80 p-3 text-xs leading-relaxed text-slate-700 shadow-sm">
+                    <motion.div
+                      initial={{ opacity: 0, rotateY: -28, x: -16 }}
+                      animate={{ opacity: 1, rotateY: 0, x: 0 }}
+                      transition={{ duration: 0.5, ease: 'easeOut' }}
+                      style={{ transformPerspective: 800 }}
+                      className="rounded-xl rounded-tl-sm border border-rose-200 bg-rose-50/80 p-3 text-xs leading-relaxed text-slate-700 shadow-sm"
+                    >
                       <pre className="whitespace-pre-wrap font-sans">{r.code.content}</pre>
-                    </div>
+                    </motion.div>
                   </div>
                 </div>
               )}
@@ -169,9 +175,15 @@ const DebatePanel = memo(function DebatePanel({ logs, verdict }: DebatePanelProp
                       {r.architect.title && <span className="text-slate-400">（{r.architect.title}）</span>}
                       <PenTool className="h-3 w-3" />
                     </div>
-                    <div className="rounded-xl rounded-tr-sm border border-sky-200 bg-sky-50/80 p-3 text-xs leading-relaxed text-slate-700 shadow-sm">
+                    <motion.div
+                      initial={{ opacity: 0, rotateY: 28, x: 16 }}
+                      animate={{ opacity: 1, rotateY: 0, x: 0 }}
+                      transition={{ duration: 0.5, ease: 'easeOut' }}
+                      style={{ transformPerspective: 800 }}
+                      className="rounded-xl rounded-tr-sm border border-sky-200 bg-sky-50/80 p-3 text-xs leading-relaxed text-slate-700 shadow-sm"
+                    >
                       <pre className="whitespace-pre-wrap font-sans">{r.architect.content}</pre>
-                    </div>
+                    </motion.div>
                   </div>
                 </div>
               )}
@@ -181,25 +193,32 @@ const DebatePanel = memo(function DebatePanel({ logs, verdict }: DebatePanelProp
 
         {/* Chief 仲裁（金卡） */}
         {verdict && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: rounds.length * 0.12 + 0.1 }}
-            className="rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 to-yellow-50/70 p-3 shadow-sm"
-          >
-            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700">
-              <Scale className="h-3.5 w-3.5" />
-              总工仲裁 · Chief Agent
-            </div>
-            <div className="text-xs leading-relaxed text-slate-700">
-              综合造价、工期、碳排放与规范校核结果，最终推荐{' '}
-              <span className="font-bold text-amber-700">{verdict.schemeName}</span>
-              ，综合得分 <span className="font-bold">{verdict.overallScore.toFixed(1)}</span> / 10。
-            </div>
-            {verdict.reason && (
-              <div className="mt-1.5 line-clamp-3 text-[11px] text-slate-500">{verdict.reason}</div>
-            )}
-          </motion.div>
+          <div className="flex justify-center pt-1">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.6, rotateY: 90 }}
+              animate={{ opacity: 1, scale: 1, rotateY: 0 }}
+              transition={{ duration: 0.55, ease: 'easeOut', delay: rounds.length * 0.12 + 0.15 }}
+              style={{ transformPerspective: 900 }}
+              className="w-full max-w-[86%] rounded-xl border border-amber-300 bg-gradient-to-r from-amber-50 to-yellow-50/70 p-3 text-center shadow-md"
+            >
+              <div className="mb-2 flex justify-center">
+                <div className="flex size-9 items-center justify-center rounded-full border border-amber-300 bg-amber-100 text-amber-700 shadow-[0_0_16px_-2px_rgba(234,179,8,0.45)]">
+                  <Gavel className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mb-1 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-amber-700">
+                总工仲裁 · Chief Agent
+              </div>
+              <div className="text-xs leading-relaxed text-slate-700">
+                综合造价、工期、碳排放与规范校核结果，最终推荐{' '}
+                <span className="font-bold text-amber-700">{verdict.schemeName}</span>
+                ，综合得分 <span className="font-bold">{verdict.overallScore.toFixed(1)}</span> / 10。
+              </div>
+              {verdict.reason && (
+                <div className="mx-auto mt-1.5 line-clamp-3 max-w-[95%] text-[11px] text-slate-500">{verdict.reason}</div>
+              )}
+            </motion.div>
+          </div>
         )}
       </div>
     </div>
