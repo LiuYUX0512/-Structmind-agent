@@ -53,6 +53,8 @@ for (const f of [indexHtmlPath, notFoundHtml]) {
   html = html.replaceAll('{{appName}}', APP_NAME);
   html = html.replaceAll('{{appDescription}}', APP_DESC);
   html = html.replaceAll('{{appAvatar}}', `${BASE}favicon.svg`);
+  // 子路径部署：站内绝对路径资源（favicon）改为带 base 前缀，避免 GitHub Pages 项目站点 404
+  html = html.replaceAll('href="/favicon.svg"', `href="${BASE}favicon.svg"`);
   // 平台运行时注入变量（妙搭埋点用，GitHub Pages 上无值，清空避免 undefined）
   html = html.replaceAll('{{appId}}', '');
   html = html.replaceAll('{{userId}}', '');
