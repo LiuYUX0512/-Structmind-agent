@@ -290,8 +290,12 @@ function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: Struc
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
-      if (Date.now() - lastInteraction.current > 4000) {
-        pendingAngle += dt * 5;
+      // autoRotate（Hero 待机）：恒定 36°/s = 10s/圈，无空闲门限；hover 或拖拽时暂停
+      // 默认模式：停止交互 4 秒后 5°/s 缓转（既有行为）
+      const idle = Date.now() - lastInteraction.current;
+      const paused = isDragging.current || (autoRotate && autoHoverPaused.current);
+      if (!paused && (autoRotate || idle > 4000)) {
+        pendingAngle += dt * (autoRotate ? 36 : 5);
         if (Math.abs(pendingAngle) >= 0.8) {
           const delta = pendingAngle;
           pendingAngle = 0;
@@ -308,6 +312,7 @@ function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: Struc
 
   // ===== 拖拽旋转（多重保险：原生 pointer 事件 + setPointerCapture + window 兜底） =====
   const isDragging = useRef(false);
+  const autoHoverPaused = useRef(false);
   const lastX = useRef(0);
   const pointerIdRef = useRef<number | null>(null);
 
@@ -1069,6 +1074,12 @@ function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: Struc
         cursor: isDraggingState ? 'grabbing' : 'grab',
       }}
       data-draggable="true"
+      onMouseEnter={() => {
+        if (autoRotate) autoHoverPaused.current = true;
+      }}
+      onMouseLeave={() => {
+        if (autoRotate) autoHoverPaused.current = false;
+      }}
     >
       {/* 蓝图网格背景 */}
       <div className="pointer-events-none absolute inset-0 bg-blueprint-grid opacity-30" />
@@ -1107,7 +1118,7 @@ function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: Struc
             className="animate-pulse"
           />
         )}
-        {autoRotate ? <g className="hero-spin hero-spin-paused">{elements}</g> : elements}
+        {elements}
       </svg>
 
       {/* 规范校核警示条 */}

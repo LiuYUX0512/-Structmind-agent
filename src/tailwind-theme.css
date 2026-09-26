@@ -538,23 +538,7 @@
   }
 }
 
-/* ===== Hero 3D 线框缓慢自转（10s/圈，hover 暂停 + 顶层柱高亮） ===== */
-@utility hero-spin {
-  animation: hero-spin 10s linear infinite;
-  transform-origin: center;
-  transform-box: fill-box;
-  will-change: transform;
-}
-@utility hero-spin-paused {
-  .group:hover & {
-    animation-play-state: paused;
-  }
-}
-@keyframes hero-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
+/* ===== Hero 3D 待机：顶层柱高亮（自转改由组件内 JS 真 3D 旋转驱动，绕竖直轴，保持等轴测观感） ===== */
 @utility hero-top-column {
   stroke: rgba(34, 211, 238, 0);
   stroke-width: 2.5;
