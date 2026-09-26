@@ -310,6 +310,10 @@ export class AgentPipeline {
       );
       // 用 toolCallId 精确配对调用与结果（fallback：按顺序 index），避免交错/缺失导致错位
       const pairByCallId = (calls: IAgentPipelineResult['actionLog'], results: IAgentPipelineResult['actionLog']) => {
+        // 三级配对，杜绝 LLM 乱序调用导致错位：
+        // ① toolCallId 精确配对（工具调用的唯一 ID，主路径）
+        // ② 从 tool_result 日志自带的 callArgs 反查（结果日志数据自完备，不依赖调用日志 args）
+        // ③ 按顺序索引（仅当前两者均缺失时的最后兜底）
         const resultByCallId = new Map<string, unknown>();
         results.forEach((r) => {
           if (r.toolCallId) resultByCallId.set(r.toolCallId, r.result);
@@ -318,8 +322,12 @@ export class AgentPipeline {
         calls.forEach((call, idx) => {
           const sysId = call.args?.systemId as string | undefined;
           if (!sysId) return;
-          const result = call.toolCallId ? resultByCallId.get(call.toolCallId) : results[idx]?.result;
-          if (result !== undefined) out.set(sysId, result);
+          const byId = call.toolCallId ? resultByCallId.get(call.toolCallId) : undefined;
+          if (byId !== undefined) { out.set(sysId, byId); return; }
+          const byArgs = [...results].reverse().find((r) => r.callArgs?.systemId === sysId);
+          if (byArgs?.result !== undefined) { out.set(sysId, byArgs.result); return; }
+          const fallback = results[idx]?.result;
+          if (fallback !== undefined) out.set(sysId, fallback);
         });
         return out;
       };
@@ -399,8 +407,13 @@ export class AgentPipeline {
       callLogs.forEach((call, idx) => {
         const sysId = call.args?.systemId as string | undefined;
         if (sysId && call.tool) {
-          const result = call.toolCallId ? resultByCallId.get(call.toolCallId) : resultLogs[idx]?.result;
-          if (result !== undefined) resultMap.set(`${sysId}:${call.tool}`, result);
+          // 三级配对（同 pairByCallId）：toolCallId → callArgs 反查 → 索引兜底
+          const byId = call.toolCallId ? resultByCallId.get(call.toolCallId) : undefined;
+          if (byId !== undefined) { resultMap.set(`${sysId}:${call.tool}`, byId); return; }
+          const byArgs = [...resultLogs].reverse().find((r) => r.callArgs?.systemId === sysId && r.tool === call.tool);
+          if (byArgs?.result !== undefined) { resultMap.set(`${sysId}:${call.tool}`, byArgs.result); return; }
+          const fallback = resultLogs[idx]?.result;
+          if (fallback !== undefined) resultMap.set(`${sysId}:${call.tool}`, fallback);
         }
       });
       schemeIds.forEach((id) => {

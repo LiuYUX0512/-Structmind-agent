@@ -67,6 +67,8 @@ const PARAMS: IProjectParams = {
 };
 
 let architectRedone = false;
+/** 场景 3 开关：Code 阶段工具调用乱序（fire 提前、体系逆序），验证配对零错位 */
+let shuffleCode = false;
 
 const buildMockResponse = (messages: any[]): any => {
   const agent = whichAgent(messages);
@@ -100,6 +102,17 @@ const buildMockResponse = (messages: any[]): any => {
 
   if (agent === 'code') {
     if (!messages.some((m: any) => m.role === 'tool')) {
+      if (shuffleCode) {
+        // 乱序场景：全部 fire 提前 + 体系逆序（模拟 LLM 不按候选顺序调用）
+        const reordered: any[] = [];
+        for (const id of [...candidates].reverse()) {
+          reordered.push(toolCall('check_fire_requirements', { systemId: id, floors: 30, buildingType: 'residential' }));
+        }
+        for (const id of [...candidates].reverse()) {
+          reordered.push(toolCall('check_seismic_requirements', { systemId: id, params: { floors: 30, seismicIntensity: '8', soilCategory: 'Ⅱ', buildingType: 'residential' } }));
+        }
+        return { role: 'assistant', content: null, tool_calls: reordered };
+      }
       const calls: any[] = [];
       for (const id of candidates) {
         calls.push(toolCall('check_seismic_requirements', { systemId: id, params: { floors: 30, seismicIntensity: '8', soilCategory: 'Ⅱ', buildingType: 'residential' } }));
@@ -324,6 +337,54 @@ async function scenarioDegrade() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+// ---------- 场景 3：乱序工具调用（数据配对零错位） ----------
+async function scenarioShuffle() {
+  callSeq = 0;
+  architectRedone = false;
+  shuffleCode = true;
+  installToolPatches();
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const body = JSON.parse(String(init?.body));
+    const message = buildMockResponse(body.messages);
+    return new Response(
+      JSON.stringify({ choices: [{ message }], usage: { total_tokens: 0 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await runAgentPipeline(
+    PARAMS,
+    undefined,
+    { mode: 'real', endpoint: 'https://api.deepseek.com/v1', apiKey: 'sk-mock-not-real', model: 'deepseek-chat', maxSteps: 20 }
+  );
+  globalThis.fetch = originalFetch;
+  shuffleCode = false;
+
+  const frame = result.codeChecks['frame'] as any;
+  const steel = result.codeChecks['steel'] as any;
+  const shearwall = result.codeChecks['shearwall'] as any;
+  const finalIds = result.schemes.map((s: any) => s.id);
+
+  const checks: Array<[string, boolean, string]> = [
+    ['frame.seismic 配对正确（抗震结果、systemId=frame）', frame?.seismic?.systemId === 'frame' && (frame.seismic.failCount ?? 0) > 0, `seismic=${JSON.stringify(frame?.seismic?.systemId)}, fail=${frame?.seismic?.failCount}`],
+    ['frame.fire 配对正确（防火结果、systemId=frame）', frame?.fire?.systemId === 'frame' && (frame.fire.failCount ?? 0) === 0, `fire=${JSON.stringify(frame?.fire?.systemId)}, fail=${frame?.fire?.failCount}`],
+    ['steel.seismic 配对正确（未错位到 frame）', steel?.seismic?.systemId === 'steel' && (steel.seismic.failCount ?? 0) === 0, `seismic=${JSON.stringify(steel?.seismic?.systemId)}, fail=${steel?.seismic?.failCount}`],
+    ['shearwall.seismic 配对正确', shearwall?.seismic?.systemId === 'shearwall', `seismic=${JSON.stringify(shearwall?.seismic?.systemId)}`],
+    ['回退闭环仍正常收敛（frame 违规 → 重出）', !finalIds.includes('frame') && finalIds.includes('frame-shearwall'), `最终 ${finalIds.join(',')}`],
+    ['无降级', !result.degraded, `degraded=${JSON.stringify(result.degraded)}`],
+  ];
+
+  console.log('\n===== 场景 3：乱序工具调用（数据配对零错位） =====\n');
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -332,10 +393,11 @@ scopedStorage.setItem(
 
 const r1 = await scenarioRecheck();
 const r2 = await scenarioDegrade();
+const r3 = await scenarioShuffle();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} ----`);
-if (r1.ok && r2.ok) {
-  console.log('🎯 真实模式升级专项验证全部通过：回退闭环生效 + 崩溃降级保命机制生效');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} ----`);
+if (r1.ok && r2.ok && r3.ok) {
+  console.log('🎯 真实模式升级专项验证全部通过：回退闭环生效 + 崩溃降级保命机制生效 + 乱序调用数据零错位');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

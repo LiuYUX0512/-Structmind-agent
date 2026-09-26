@@ -23,6 +23,8 @@ export interface IAgentActionLog {
   result?: unknown;
   /** 工具调用唯一 ID（type = tool_call / tool_result 时，用于将调用与结果精确配对） */
   toolCallId?: string;
+  /** 本次调用的解析后参数（type = tool_result 时记录，供 pipeline 按参数反查配对，增强乱序鲁棒性） */
+  callArgs?: Record<string, unknown>;
   /** 时间戳 */
   timestamp?: number;
 }

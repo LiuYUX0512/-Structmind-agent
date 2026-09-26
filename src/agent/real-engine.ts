@@ -252,6 +252,7 @@ export class RealEngine {
         tool: name,
         result: { error: errMsg },
         toolCallId,
+        callArgs: args,
       });
       return {
         role: 'tool',
@@ -271,6 +272,7 @@ export class RealEngine {
         tool: name,
         result: result as unknown,
         toolCallId,
+        callArgs: args,
       });
 
       return {
@@ -289,6 +291,7 @@ export class RealEngine {
         tool: name,
         result: { error: errMsg },
         toolCallId,
+        callArgs: args,
       });
       return {
         role: 'tool',
