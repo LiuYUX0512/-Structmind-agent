@@ -5,6 +5,8 @@ import type { IProjectParams, IStructureScheme } from '@/data/structure';
 interface StructureWireframeProps {
   params: IProjectParams;
   scheme?: IStructureScheme | null;
+  /** 规范校核结果（方案级：{ schemeId: { seismic: { checks }, fire: { checks } } }），用于违规警示 */
+  codeChecks?: Record<string, unknown>;
 }
 
 /**
@@ -213,7 +215,7 @@ function deriveStructureComponents(
  * 纯 SVG 2.5D 线框图（等轴测投影）
  * 根据不同结构体系差异化渲染：梁柱网格、剪力墙、核心筒、桁架 等
  */
-function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
+function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWireframeProps) {
   const geom = useMemo(() => deriveGeometry(params), [params]);
   const struct = useMemo(
     () => deriveStructureComponents(scheme?.id, geom.baysX, geom.baysZ, params.floors),
@@ -222,6 +224,26 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [rotateAngle, setRotateAngle] = useState(-30);
+  // ===== 规范校核警示（违规构件可视化：校核未通过/需关注项 → 红色警示 + 条文提示） =====
+  const violations = useMemo(() => {
+    if (!scheme?.id || !codeChecks) return [];
+    const cc = codeChecks[scheme.id] as
+      | { seismic?: { checks?: Array<{ name: string; status: string; clauseText?: string }> }; fire?: { checks?: Array<{ item?: string; name?: string; status: string; clauseText?: string }> } }
+      | undefined;
+    if (!cc) return [];
+    const out: Array<{ name: string; clause: string }> = [];
+    for (const c of cc.seismic?.checks ?? []) {
+      if (c.status === 'fail' || c.status === 'warning') {
+        out.push({ name: `[抗震] ${c.name}`, clause: c.clauseText || '' });
+      }
+    }
+    for (const c of cc.fire?.checks ?? []) {
+      if (c.status === 'fail' || c.status === 'warning') {
+        out.push({ name: `[防火] ${c.item || c.name || ''}`, clause: c.clauseText || '' });
+      }
+    }
+    return out;
+  }, [scheme, codeChecks]);
   const [zoom, setZoom] = useState(1);
   const [isDraggingState, setIsDraggingState] = useState(false);
   const animRef = useRef<number | null>(null);
@@ -1060,8 +1082,48 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
           </pattern>
         </defs>
         <rect x={bbox.x} y={bbox.y} width={bbox.w} height={bbox.h} fill="url(#grid-pattern-3d)" />
+        {violations.length > 0 && (
+          <rect
+            x={bbox.x - 1.5}
+            y={bbox.y - 1.5}
+            width={bbox.w + 3}
+            height={bbox.h + 3}
+            fill="none"
+            stroke="#e11d48"
+            strokeWidth={1}
+            strokeDasharray="6 4"
+            className="animate-pulse"
+          />
+        )}
         {elements}
       </svg>
+
+      {/* 规范校核警示条 */}
+      {violations.length > 0 && (
+        <div className="pointer-events-auto absolute left-1/2 top-2 z-10 w-[96%] max-w-[520px] -translate-x-1/2">
+          <div
+            className="rounded-md border border-rose-400/70 bg-rose-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+            title={violations.map((v) => v.clause).join('\n')}
+          >
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 text-xs text-rose-600">⚠️</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-rose-700">
+                  规范校核需关注 {violations.length} 项
+                </div>
+                <div className="mt-0.5 space-y-0.5">
+                  {violations.slice(0, 3).map((v, i) => (
+                    <div key={i} className="text-[10px] leading-snug text-rose-600/90">
+                      {v.name}
+                      {v.clause && <span className="text-rose-500/70"> —— {v.clause.slice(0, 48)}{v.clause.length > 48 ? '…' : ''}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 信息角标 - 左下：体系名称 */}
       <div className="pointer-events-none absolute bottom-2 left-3 font-mono text-[10px] text-muted-foreground">
@@ -1082,7 +1144,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
   );
 }
 
-function StructureWireframe3D({ params, scheme }: StructureWireframeProps) {
+function StructureWireframe3D({ params, scheme, codeChecks }: StructureWireframeProps) {
   // 空数据保护
   if (!params || !params.floors || !params.area) {
     return (
@@ -1101,7 +1163,7 @@ function StructureWireframe3D({ params, scheme }: StructureWireframeProps) {
         </div>
       }
     >
-      <StructureWireframeSVG params={params} scheme={scheme} />
+      <StructureWireframeSVG params={params} scheme={scheme} codeChecks={codeChecks} />
     </ErrorBoundary>
   );
 }

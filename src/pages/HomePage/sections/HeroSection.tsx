@@ -10,9 +10,11 @@ interface HeroSectionProps {
   params?: IProjectParams | null;
   /** 当前选中的结构方案（用于 3D 预览随方案变化） */
   scheme?: IStructureScheme | null;
+  /** 规范校核结果（3D 违规警示） */
+  codeChecks?: Record<string, unknown>;
 }
 
-function HeroSection({ onStart, params, scheme }: HeroSectionProps) {
+function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) {
   const features = [
     { icon: PenTool, label: '方案创作', desc: '多体系智能生成', accent: 'primary' },
     { icon: Scale, label: '规范校核', desc: 'GB 55002 · 50011', accent: 'teal' },
@@ -269,7 +271,7 @@ function HeroSection({ onStart, params, scheme }: HeroSectionProps) {
                   className="relative aspect-square w-full overflow-hidden"
                   style={{ borderRadius: '4px' }}
                 >
-                  <StructureWireframe3D params={displayParams} scheme={scheme} />
+                  <StructureWireframe3D params={displayParams} scheme={scheme} codeChecks={codeChecks} />
                 </div>
 
                 {/* 图纸标签 */}

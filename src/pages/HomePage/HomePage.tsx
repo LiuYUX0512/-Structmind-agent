@@ -207,6 +207,9 @@ export default function HomePage() {
   const [optimizationResult, setOptimizationResult] = useState<IOptimizationResult | null>(null);
   const [visibleIteration, setVisibleIteration] = useState<number>(0); // 当前展示到第几轮
   const [paramsFormKey, setParamsFormKey] = useState(0); // 递增触发 ParamsSection 整体重挂载重置表单
+  // 规范校核结果 / 总工建议（报告导出 + 3D 违规警示 + 报告结构化章节）
+  const [lastCodeChecks, setLastCodeChecks] = useState<Record<string, unknown>>({});
+  const [lastAdvice, setLastAdvice] = useState<IAgentPipelineResult['advice'] | null>(null);
   // 工程历史版本（版本回溯 / 对比）
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyList, setHistoryList] = useState<IHistoryEntry[]>([]);
@@ -829,6 +832,10 @@ ${dis || '- （待补充）'}
           setHistoryList(saveHistoryEntry(buildHistoryEntry(params, result)));
         }
 
+        // 规范校核结果 + 总工建议（供 3D 违规警示与报告导出使用）
+        setLastCodeChecks((result.codeChecks as Record<string, unknown>) || {});
+        setLastAdvice(result.advice || null);
+
         // 总工主动优化建议分析
         const topScheme = result.schemes.find((s) => s.id === result.recommended.schemeId);
         if (topScheme) {
@@ -933,6 +940,9 @@ ${dis || '- （待补充）'}
                 breakdown: r.breakdown,
               })),
             });
+
+            setLastCodeChecks((fallbackResult.codeChecks as Record<string, unknown>) || {});
+            setLastAdvice(fallbackResult.advice || null);
 
             setAgentContext({
               currentParams: params,
@@ -1401,6 +1411,7 @@ ${dis || '- （待补充）'}
           onStart={scrollToParams}
           params={projectParams}
           scheme={schemes.find((s) => s.id === selectedSchemeId) || (recommendation ? schemes[0] : null)}
+          codeChecks={lastCodeChecks}
         />
          <ParamsSection
            onGenerate={handleGenerate}
@@ -1462,6 +1473,7 @@ ${dis || '- （待补充）'}
               onStartOptimization={handleStartOptimization}
               isAutoOptimizing={isAutoOptimizing}
               lockedParams={lockedParams}
+              codeChecks={lastCodeChecks}
             />
         </motion.div>
         <ChatSection
@@ -1780,6 +1792,8 @@ ${dis || '- （待补充）'}
            recommendation={recommendation}
            weights={weights}
            isDemoMode={isDemoMode}
+           advice={lastAdvice}
+           codeChecks={lastCodeChecks}
          />
        </div>
 

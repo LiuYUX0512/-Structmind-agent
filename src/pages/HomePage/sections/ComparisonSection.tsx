@@ -102,6 +102,8 @@ interface ComparisonSectionProps {
   isAutoOptimizing?: boolean;
   /** 被锁定的参数（影响 3D 模型展示说明） */
   lockedParams?: Partial<Record<keyof IProjectParams, boolean>>;
+  /** 规范校核结果（3D 违规警示） */
+  codeChecks?: Record<string, unknown>;
 }
 
 const RADAR_DIMENSIONS = [
@@ -129,6 +131,7 @@ function ComparisonSection({
   onStartOptimization,
   isAutoOptimizing,
   lockedParams = {},
+  codeChecks,
 }: ComparisonSectionProps) {
   const hasSchemes = schemes.length > 0;
   const [optimizeInput, setOptimizeInput] = useState('');
@@ -893,7 +896,7 @@ function ComparisonSection({
                   style={{ borderRadius: '0 0 6px 6px' }}
                 >
                   {projectParams ? (
-                    <StructureWireframe3D params={projectParams} scheme={displayedScheme} />
+                    <StructureWireframe3D params={projectParams} scheme={displayedScheme} codeChecks={codeChecks} />
                   ) : (
                     <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                       等待输入参数
