@@ -1367,7 +1367,7 @@ ${dis || '- （待补充）'}
           <LoadingScreen onComplete={() => setIsInitialLoading(false)} />
         )}
       </AnimatePresence>
-      <div className="min-h-screen bg-blueprint-fade text-foreground">
+      <div className="app-shell min-h-screen bg-blueprint-fade text-foreground">
       {/* Global blueprint grid overlay */}
       <div className="pointer-events-none fixed inset-0 z-0 bg-blueprint-grid opacity-[0.4]" />
       <div className="pointer-events-none fixed inset-0 z-0 bg-gradient-to-b from-background/60 via-background/80 to-background" />
@@ -1800,16 +1800,14 @@ ${dis || '- （待补充）'}
        {/* 打印专用样式 */}
        <style>{`
          @media print {
-           body * {
-             visibility: hidden;
-           }
-           .print-only, .print-only * {
-             visibility: visible;
+           /* 隐藏应用主界面：用 display:none（不保留布局占位），避免打印出现大量空白页与
+              visibility:hidden 元素背景的跨页渲染伪影（最右侧色片） */
+           .app-shell, #root > div:not(.print-only) {
+             display: none !important;
            }
            .print-only {
-             position: absolute;
-             left: 0;
-             top: 0;
+             display: block !important;
+             position: static;
              width: 100%;
            }
            .print-report {

@@ -181,6 +181,22 @@ function ReportPrintView({ params, schemes, recommendation, weights, isDemoMode,
     ];
   }, []);
 
+  if (!schemes || schemes.length === 0) {
+    return (
+      <div className="print-report bg-white text-black p-12 flex flex-col items-center justify-center min-h-[60vh] text-center">
+        <div className="text-3xl font-bold text-gray-900 mb-4">智构 StructMind</div>
+        <div className="text-base text-gray-600 mb-6">建筑结构方案优化分析报告</div>
+        <div className="rounded-md border border-amber/40 bg-amber/10 px-6 py-4 text-sm text-amber-foreground">
+          当前尚未生成方案，请先在应用中完成「方案智能生成」后再打印本报告。
+        </div>
+        <div className="mt-8 text-xs text-gray-400">
+          本报告由智构 StructMind 智能体自动生成，仅供方案阶段参考
+          {isDemoMode && '（演示模式）'}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="print-report bg-white text-black p-12">
       {/* ========== 封面 ========== */}
