@@ -18,6 +18,7 @@ import HeroSection from './sections/HeroSection';
 import ParamsSection from './sections/ParamsSection';
 import SchemesSection from './sections/SchemesSection';
 import ComparisonSection from './sections/ComparisonSection';
+import { DebatePanel } from '@/components/DebatePanel';
 import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
 import type {
@@ -1453,6 +1454,26 @@ ${dis || '- （待补充）'}
           onRestart={() => doGenerate(projectParams || MOCK_PROJECT_PARAMS, weights)}
           onOpenConfig={() => setConfigOpen(true)}
         />
+        {schemes.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            <DebatePanel
+              logs={actionLog}
+              verdict={
+                recommendation
+                  ? {
+                      schemeName: recommendation.schemeName,
+                      overallScore: recommendation.overallScore,
+                      reason: recommendation.reason,
+                    }
+                  : null
+              }
+            />
+          </motion.div>
+        )}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}

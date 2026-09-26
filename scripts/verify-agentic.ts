@@ -11,6 +11,10 @@ import { TOOL_REGISTRY, executeToolByName } from '../src/agent/tools';
 import { resolveKnowledgeBasis } from '../src/data/code-knowledge';
 import { saveHistoryEntry, loadHistory, clearHistory, type IHistoryEntry } from '../src/data/project-history';
 import type { IProjectParams } from '../src/data/structure';
+import { parseIntentByRules } from '../src/agent/intent';
+import { EIntentType } from '../src/agent/types';
+import { estimateCarbonBreakdown } from '../src/data/carbon-model';
+import { extractDebateItems } from '../src/components/DebatePanel';
 
 // ---------- Mock LLM 工具 ----------
 let callSeq = 0;
@@ -643,6 +647,55 @@ async function scenarioHistory() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+// ---------- 场景 9：辩论可视化提取 + 意图同义归一 + 碳排放构成（第 12/13/14 条落地验证） ----------
+async function scenarioNewFeatures() {
+  console.log('\n===== 场景 9：辩论提取 + 意图归一 + 碳排构成 =====\n');
+  const checks: Array<[string, boolean, string]> = [];
+
+  // --- 9a. 辩论看板数据提取：演示模式 actionLog 里的"第N轮辩论"日志 ---
+  const logs = [
+    { type: 'think', agent: 'code', content: '【第1轮辩论 · Code 挑刺 框架结构】\n逐一审校后，发现以下不符合项：\n  弹性层间位移角：实际 1/480，限值 1/550\n判定结论：框架结构 不满足规范要求，不能作为推荐方案进入下一轮。', timestamp: 1 },
+    { type: 'think', agent: 'architect', content: '【第1轮辩论 · Architect 回应】\n收到 Code Agent 对 框架结构 的质疑。同意你的判断。\n我的调整：将「框架结构」替换为「框架-剪力墙结构」重算。\n请 Code Agent 重新校核 框架-剪力墙结构。', timestamp: 2 },
+    { type: 'tool_call', agent: 'code', tool: 'check_seismic_requirements', content: '对替换方案进行校核（第 1 轮重算）', timestamp: 3 },
+    { type: 'think', agent: 'code', content: '【第2轮辩论 · Code 挑刺 框架-剪力墙结构】\n判定结论：仍不满足。', timestamp: 4 },
+  ];
+  const items = extractDebateItems(logs as any);
+  checks.push(['辩论条目提取数量（2 轮 × 各 1 条有效）', items.length === 3, `${items.length} 条`]);
+  checks.push(['Code 挑刺识别为 code 角色', items[0]?.role === 'code' && items[0]?.loop === 1, `${items[0]?.role}#${items[0]?.loop}`]);
+  checks.push(['Architect 回应识别为 architect 角色', items[1]?.role === 'architect' && items[1]?.loop === 1, `${items[1]?.role}#${items[1]?.loop}`]);
+  checks.push(['第 2 轮轮次正确', items[2]?.loop === 2, `loop=${items[2]?.loop}`]);
+  checks.push(['标题（方案名）提取', items[0]?.title.includes('框架'), items[0]?.title || '(空)']);
+  checks.push(['正文不含标记头', !items[0]?.content.includes('第1轮辩论'), items[0]?.content.slice(0, 20) + '…']);
+
+  // --- 9b. 意图同义归一化（第 12 条） ---
+  const cut1 = parseIntentByRules('帮我砍点预算');
+  checks.push(['「帮我砍点预算」归一为 ASK_BUDGET_CUT', cut1.intent === EIntentType.ASK_BUDGET_CUT, cut1.intent]);
+  const cut2 = parseIntentByRules('预算能不能少点');
+  checks.push(['「预算能不能少点」归一为 ASK_BUDGET_CUT', cut2.intent === EIntentType.ASK_BUDGET_CUT, cut2.intent]);
+  const cut3 = parseIntentByRules('预算砍20%');
+  checks.push(['「预算砍20%」带幅度参数', cut3.intent === EIntentType.ASK_BUDGET_CUT && cut3.budgetCutPercent === 20, `pct=${cut3.budgetCutPercent}`]);
+  const askCode = parseIntentByRules('层间位移角限值是多少');
+  checks.push(['规范问句不回归（仍是 ASK_CODE）', askCode.intent === EIntentType.ASK_CODE, askCode.intent]);
+  const change = parseIntentByRules('改成20层');
+  checks.push(['参数修改不回归（仍是 CHANGE_PARAMS）', change.intent === EIntentType.CHANGE_PARAMS, change.intent]);
+
+  // --- 9c. 碳排放构成（第 14 条）：三阶段之和 = 合计；基准对比存在 ---
+  const cb = estimateCarbonBreakdown('frame', 10);
+  const sum = Math.round((cb.production + cb.transport + cb.construction) * 10) / 10;
+  checks.push(['三阶段之和 = 合计', sum === cb.total, `${cb.production}+${cb.transport}+${cb.construction}=${sum} / total=${cb.total}`]);
+  checks.push(['基准值存在且为正', cb.baseline > 0, `baseline=${cb.baseline}`]);
+  const cbSteel = estimateCarbonBreakdown('steel', 20);
+  checks.push(['钢结构生产阶段占比更高', cbSteel.production / cbSteel.total > cb.production / cb.total, `${(cbSteel.production / cbSteel.total).toFixed(2)} vs ${(cb.production / cb.total).toFixed(2)}`]);
+  checks.push(['vsBaselinePct 有符号', typeof cb.vsBaselinePct === 'number' && !Number.isNaN(cb.vsBaselinePct), `${cb.vsBaselinePct}%`]);
+
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -657,10 +710,11 @@ const r5 = await scenarioHitl();
 const r6 = await scenarioChiefStructured();
 const r7 = await scenarioKnowledge();
 const r8 = await scenarioHistory();
+const r9 = await scenarioNewFeatures();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} ----`);
-if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok) {
-  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} · 场景9 ${r9.pass}/${r9.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok && r9.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本 + 辩论提取 + 意图归一 + 碳排构成');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

@@ -6,6 +6,7 @@ import {
   type IWeightConfig,
   calculateBuildingHeight,
 } from '@/data/structure';
+import { estimateCarbonBreakdown } from '@/data/carbon-model';
 import type { IAgentPipelineResult } from '@/agent/types';
 
 interface ReportPrintViewProps {
@@ -405,6 +406,49 @@ function ReportPrintView({ params, schemes, recommendation, weights, isDemoMode,
                 <SchemeRadar scheme={s} />
               </div>
             ))}
+          </div>
+
+          <div className="mt-6">
+            <div className="text-sm font-semibold text-gray-700 mb-3">
+              碳排放构成（方案阶段估算 · GB/T 51366 计算边界）
+            </div>
+            <div className="space-y-3">
+              {schemes.map((s, i) => {
+                const cb = estimateCarbonBreakdown(s.id, params?.floors ?? 1);
+                const maxV = Math.max(cb.total, cb.baseline, 1);
+                const pctW = (v: number) => (v / maxV) * 100;
+                return (
+                  <div key={`carbon-${s.id}`} className="border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="font-medium text-gray-800">方案{i + 1}：{s.name}</span>
+                      <span className="text-gray-600">
+                        合计 <span className="font-bold text-gray-800">{cb.total}</span> kgCO₂/㎡
+                        <span className="ml-2">
+                          {cb.vsBaselinePct <= 0 ? '✅' : '⚠️'} 较常规框架基准
+                          <span className="font-medium">{cb.vsBaselinePct > 0 ? '+' : ''}{cb.vsBaselinePct}%</span>
+                        </span>
+                      </span>
+                    </div>
+                    <div className="relative h-4 w-full rounded-full bg-gray-100 overflow-hidden">
+                      <div className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: `${pctW(cb.production)}%` }} />
+                      <div className="absolute inset-y-0 bg-sky-500" style={{ left: `${pctW(cb.production)}%`, width: `${pctW(cb.transport)}%` }} />
+                      <div className="absolute inset-y-0 bg-indigo-400" style={{ left: `${pctW(cb.production + cb.transport)}%`, width: `${pctW(cb.construction)}%` }} />
+                      <div className="absolute inset-y-0 w-0.5 bg-rose-500" style={{ left: `${pctW(cb.baseline)}%` }} title={`基准 ${cb.baseline} kgCO₂/㎡`} />
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-3 text-[10px] text-gray-500">
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-emerald-500 inline-block" /> 建材生产 {cb.production}</span>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-sky-500 inline-block" /> 建材运输 {cb.transport}</span>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-indigo-400 inline-block" /> 建造施工 {cb.construction}</span>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-rose-500 inline-block" /> 常规框架基准 {cb.baseline}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-gray-400">
+              注：按 GB/T 51366-2019《建筑碳排放计算标准》阶段划分（建材生产 A1-A3 / 运输 A4 / 施工 A5），
+              数值取自 CLCD、ICE 等数据库经验均值，属方案阶段量级估算（±15%）；运行阶段碳排放（B6）依赖机电与建筑方案，未纳入结构比选范围。
+            </p>
           </div>
         </div>
       </section>

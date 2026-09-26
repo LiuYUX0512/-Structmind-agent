@@ -22,6 +22,37 @@ export function parseIntentByRules(message: string): IIntentResult {
   const msg = message.trim();
   const lowerMsg = msg.toLowerCase();
 
+  // 12. ASK_BUDGET_CUT — 预算削减（同义归一化：有无百分比均触发；无百分比默认按 20% 试算，回复中明确标注）
+  // 置于 CHANGE_PARAMS 之前：预算削减是更具体的意图，优先于泛化参数修改匹配
+  // 注意：[^\d]{0,6} 避免贪婪吞掉百分比数字（[\s\S]{0,6} 会把 "砍20%" 的 "2" 吞掉导致 (\d+) 只捕获 "0"）
+  const budgetCutMatch = msg.match(/预算.*(砍|降|减少|压缩|削减|省)[^\d]{0,6}(\d+)\s*%/) || msg.match(/(\d+)\s*%.*预算/);
+  // 无百分比表达："帮我砍点预算 / 预算能不能少点 / 少花点钱 / 控制一下成本" —— 归一为同一意图
+  // 但"预算砍到3000 / 预算降到3500"是具体数值修改 → 排除，归 CHANGE_PARAMS
+  const budgetCutNoPct =
+    (/(砍|压|省|降|少花|控制|收紧).*预算/.test(msg) ||
+      /预算.*(能|可以)?(少|降|省|砍|压|收)/.test(msg) ||
+      /(少花点钱|控制成本|预算太高|预算有限)/.test(msg)) &&
+    !/预算.*(到|为|成|至)\s*\d+/.test(msg);
+  if (budgetCutMatch && /预算|造价|成本/.test(msg)) {
+    // 捕获组 [1] 是动作词（砍/降/省…），[2] 才是百分比数字
+    const pct = parseInt(budgetCutMatch[2], 10);
+    if (pct > 0 && pct <= 90) {
+      return {
+        intent: EIntentType.ASK_BUDGET_CUT,
+        budgetCutPercent: pct,
+        confidence: 0.85,
+        rawMessage: msg,
+      };
+    }
+  }
+  if (budgetCutNoPct && /预算|造价|成本|钱/.test(msg)) {
+    return {
+      intent: EIntentType.ASK_BUDGET_CUT,
+      confidence: 0.7,
+      rawMessage: msg,
+    };
+  }
+
   // 1. CHANGE_PARAMS — 参数修改类
   const floorMatch = msg.match(/(\d+)\s*层/);
   const budgetMatch = msg.match(/预算[\s\S]{0,10}(\d+)/) || msg.match(/(\d+)\s*元\/平/);
@@ -170,20 +201,6 @@ export function parseIntentByRules(message: string): IIntentResult {
       confidence: 0.8,
       rawMessage: msg,
     };
-  }
-
-  // 12. ASK_BUDGET_CUT — 预算大幅削减
-  const budgetCutMatch = msg.match(/预算.*(砍|降|减少|压缩|削减)[\s\S]{0,6}(\d+)%/) || msg.match(/(\d+)%.*预算/);
-  if (budgetCutMatch && /预算|造价|成本/.test(msg)) {
-    const pct = parseInt(budgetCutMatch[1], 10);
-    if (pct > 0 && pct <= 90) {
-      return {
-        intent: EIntentType.ASK_BUDGET_CUT,
-        budgetCutPercent: pct,
-        confidence: 0.85,
-        rawMessage: msg,
-      };
-    }
   }
 
   // 13. ASK_BENCHMARK — 与同类项目对比
@@ -338,8 +355,49 @@ export class IntentEngine {
 
       case EIntentType.UNKNOWN:
       default:
+        // 低置信意图澄清：规则未识别，但命中明确工程主题 + 问句 → 先反问用户具体意图，不盲目执行
+        const clarify = this.tryClarify(message, intent);
+        if (clarify) return clarify;
         return this.handleUnknown(intent, message);
     }
+  }
+
+  /**
+   * 低置信澄清机制（Agent 会反问，而不是乱猜）
+   * 仅当规则引擎判定 UNKNOWN、且消息命中明确工程主题词 + 问句形态时触发，
+   * 返回"您是想…吗？"式的澄清问句，把决策权交还给用户。
+   */
+  private tryClarify(
+    message: string,
+    intent: IIntentResult
+  ): { intent: IIntentResult; reply: string } | null {
+    const isAsk = /能不能|可以吗|怎么样|怎么办|怎么处理|如何|行不行|可不可以|好吗|吗\s*[?？]|呢[?？]/.test(message);
+    if (!isAsk) return null;
+
+    const dims: Array<{ re: RegExp; label: string }> = [
+      { re: /预算|造价|成本|钱|便宜|贵/, label: '预算/造价' },
+      { re: /工期|进度|时间|多久/, label: '工期' },
+      { re: /抗震|地震|设防|烈度/, label: '抗震设防' },
+      { re: /基础|地基|桩|承台/, label: '基础形式' },
+      { re: /含钢量|用钢量|钢筋/, label: '含钢量' },
+      { re: /隔震|减震|阻尼|消能/, label: '隔震减震' },
+      { re: /防火|消防|耐火/, label: '防火' },
+      { re: /碳|绿建|节能|能耗/, label: '碳排放/绿建' },
+      { re: /层数|楼层|高度/, label: '层数/高度' },
+    ];
+    const hits = dims.filter((d) => d.re.test(message)).map((d) => d.label);
+    if (hits.length === 0) return null;
+
+    const target = hits[0];
+    const reply = [
+      `我理解您想了解「${hits.join('、')}」相关的问题，但还不太确定您的具体意图。您是想：`,
+      '',
+      hits.map((h) => `- 了解当前方案的 ${h} 情况？（我会给出数据对比）`).join('\n'),
+      '',
+      `还是想让我**调整参数重新分析**？比如告诉我「${target}控制在多少合适」，我可以直接按新约束重跑方案比选。`,
+    ].join('\n');
+
+    return { intent: { ...intent, confidence: 0.55 }, reply };
   }
 
   /** CHANGE_PARAMS：修改参数并触发重新生成 */
@@ -930,6 +988,10 @@ export class IntentEngine {
 
     lines.push(`## 预算削减 ${pct}% 的影响分析`);
     lines.push('');
+    if (!intent.budgetCutPercent) {
+      lines.push('> ℹ️ 您未指定削减幅度，这里按 **20%** 试算。如需其他幅度（如 10%、30%），请直接告诉我，我会重新分析。');
+      lines.push('');
+    }
     lines.push(`| 项目 | 当前 | 削减后 |`);
     lines.push('|------|------|--------|');
     lines.push(`| 预算约束 | ${params.budget.toLocaleString()} 元/㎡ | **${newBudget.toLocaleString()} 元/㎡** |`);
