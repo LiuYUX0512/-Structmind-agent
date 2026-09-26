@@ -1,5 +1,6 @@
 // AgentConfigPanel — Agent 配置面板
 // 配置 API 地址、模型名、API Key、推理模式，本地持久化
+// 安全代理：API Key 由服务端环境变量持有，前端零暴露（推荐，比赛评审安全）
 // EXPORTS: AgentConfigPanel
 
 import { memo, useState, useEffect } from 'react';
@@ -12,6 +13,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Sparkles,
+  ShieldCheck,
   Eye,
   EyeOff,
   X,
@@ -62,6 +64,14 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
     setLocalConfig(config);
   }, [config, open]);
 
+  const isProxy = localConfig.apiBase.trim().startsWith('/');
+  const hasKey = Boolean(localConfig.apiKey.trim());
+
+  const useSecureProxy = () => {
+    setLocalConfig({ ...localConfig, apiBase: '/api/chat', apiKey: '' });
+    toast.info('已切换到安全代理模式：Key 由服务端保护，前端不再持有');
+  };
+
   const handleSave = () => {
     // 同步保存到 agent engine 配置（real-engine 读取同一份数据）
     try {
@@ -81,8 +91,6 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
     setTimeout(() => onOpenChange(false), 500);
   };
 
-  const hasKey = Boolean(localConfig.apiKey.trim());
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[540px] border-border/60 bg-card/95 backdrop-blur-md">
@@ -92,8 +100,8 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
             Agent 推理配置
           </DialogTitle>
           <DialogDescription className="text-xs">
-            配置大模型 API 参数以启用真实推理；未配置时自动运行演示轨迹模式。
-            所有凭据仅保存在本地浏览器中。
+            推荐使用<strong className="text-teal">安全代理</strong>：API Key 存于服务端环境变量，前端零暴露；
+            未配置任何推理能力时自动运行演示轨迹模式。
           </DialogDescription>
         </DialogHeader>
 
@@ -120,7 +128,7 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
                 >
                   <span className="font-semibold text-foreground">自动</span>
                   <span className="text-[10px] text-muted-foreground leading-relaxed">
-                    有 Key 走真实推理，无 Key 走演示轨迹
+                    代理/Key 就绪走真实推理，否则演示轨迹
                   </span>
                 </Label>
               </div>
@@ -136,7 +144,7 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
                 >
                   <span className="font-semibold text-foreground">强制真实</span>
                   <span className="text-[10px] text-muted-foreground leading-relaxed">
-                    必须配置有效 API Key，否则报错
+                    必须走真实推理，配置不足时明确报错
                   </span>
                 </Label>
               </div>
@@ -163,18 +171,31 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
           <div className="space-y-1.5">
             <Label htmlFor="api-base" className="text-xs font-medium flex items-center gap-1.5">
               <Globe className="size-3 text-muted-foreground" />
-              API Base URL
+              API 接口
             </Label>
             <Input
               id="api-base"
               value={localConfig.apiBase}
               onChange={(e) => setLocalConfig({ ...localConfig, apiBase: e.target.value })}
-              placeholder="https://api.deepseek.com/v1"
+              placeholder="/api/chat（安全代理）或 https://api.deepseek.com/v1（直连）"
               className="font-mono text-xs"
             />
             <p className="text-[10px] text-muted-foreground">
-              支持 OpenAI 兼容接口。示例：DeepSeek / 通义千问 / Moonshot
+              <span className="text-teal">/api/chat</span> = 服务端代理（Key 在服务端，前端零暴露，推荐）
+              ；<span className="text-muted-foreground">https://.../v1</span> = 直连（需填写 Key，仅存本机浏览器）。
             </p>
+            {!isProxy && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1 h-7 text-[11px] text-teal"
+                onClick={useSecureProxy}
+              >
+                <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                一键切换为安全代理（推荐）
+              </Button>
+            )}
           </div>
 
           {/* 模型名 */}
@@ -200,11 +221,11 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
             </Select>
           </div>
 
-          {/* API Key */}
+          {/* API Key（仅直连模式需要） */}
           <div className="space-y-1.5">
             <Label htmlFor="api-key" className="text-xs font-medium flex items-center gap-1.5">
               <KeyRound className="size-3 text-muted-foreground" />
-              API Key
+              API Key <span className="text-[10px] font-normal text-muted-foreground">（仅直连模式需要，代理模式留空）</span>
             </Label>
             <div className="relative">
               <Input
@@ -226,10 +247,15 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              {hasKey ? (
+              {isProxy ? (
+                <Badge variant="outline" className="border-teal/40 bg-teal/10 text-teal text-[10px]">
+                  <ShieldCheck className="mr-1 size-2.5" />
+                  安全代理 · Key 由服务端保护
+                </Badge>
+              ) : hasKey ? (
                 <Badge variant="outline" className="border-success/30 bg-success/10 text-success text-[10px]">
                   <CheckCircle2 className="mr-1 size-2.5" />
-                  已配置
+                  已配置直连 Key（仅存本机）
                 </Badge>
               ) : (
                 <Badge variant="outline" className="border-warning/30 bg-warning/10 text-warning text-[10px]">
@@ -244,19 +270,25 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
           <div className="rounded-md border border-dashed border-border/50 bg-background/30 p-3 text-[11px] leading-relaxed">
             <div className="mb-1.5 flex items-center gap-1.5 font-semibold text-foreground">
               <Sparkles className="h-3.5 w-3.5 text-teal" />
-              两种模式差异
+              推理链路说明
             </div>
             <ul className="space-y-1 text-muted-foreground">
               <li className="flex gap-2">
-                <span className="font-mono text-teal">演示轨迹</span>
+                <span className="font-mono text-teal">安全代理</span>
                 <span>
-                  基于真实结构计算+专家推理模板动态生成，计算结果与真实模式完全一致；思考文本为预制专家模板，适用于答辩演示与离线使用。
+                  请求 → <span className="font-mono">/api/chat</span> → 服务端持有 Key 转发到 DeepSeek。前端代码与浏览器均不接触 Key，评审演示零泄漏风险。
                 </span>
               </li>
               <li className="flex gap-2">
-                <span className="font-mono text-primary">真实推理</span>
+                <span className="font-mono text-primary">直连</span>
                 <span>
-                  调用大模型 function calling，Agent 自主决定调用哪些工具、如何组织方案，回答更灵活但需要 API 与网络。
+                  前端直接调用大模型 function calling，Agent 自主决定调用哪些工具、如何组织方案；Key 仅保存在本机浏览器。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono text-amber">演示轨迹</span>
+                <span>
+                  基于真实结构计算+专家推理模板动态生成，计算结果与真实模式完全一致；无需网络与 API，适合答辩离线演示。
                 </span>
               </li>
             </ul>

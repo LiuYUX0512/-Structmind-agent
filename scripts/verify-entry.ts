@@ -211,7 +211,7 @@ try {
   result = await runAgentPipeline(
     PARAMS,
     undefined,
-    { mode: 'real' },
+    { mode: 'real', endpoint: 'https://api.deepseek.com/v1', apiKey: 'sk-mock-not-real', model: 'deepseek-chat', maxSteps: 20 },
     (_log: IAgentActionLog[], agentIndex: number) => progress.push(agentIndex)
   );
 } catch (e) {

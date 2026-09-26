@@ -5,7 +5,7 @@
 // EXPORTS: AgentPipeline, runAgentPipeline
 
 import { TraceEngine } from './trace-engine';
-import { RealEngine, isRealModeAvailable } from './real-engine';
+import { RealEngine } from './real-engine';
 import {
   SUB_AGENT_SPECS,
   type IAgentPipelineResult,
@@ -117,10 +117,14 @@ export class AgentPipeline {
   /** 运行完整管线 */
   async run(): Promise<IAgentPipelineResult> {
     // 强制真实模式校验：用户指定 real 但配置不足时直接报错，不静默降级
-    if (this.config.mode === 'real' && !isRealModeAvailable()) {
-      throw new Error(
-        '真实推理模式不可用：缺少有效的 API Key / 接口地址 / 模型名称。请在配置面板中填写完整，或切换到演示轨迹模式。'
-      );
+    if (this.config.mode === 'real') {
+      const endpoint = this.config.endpoint;
+      const usable = !!endpoint && (endpoint.startsWith('/') || !!(this.config.apiKey && this.config.model));
+      if (!usable) {
+        throw new Error(
+          '真实推理模式不可用：未配置有效的代理接口或 API Key / 模型名称。请在配置面板中选择安全代理或填写直连参数，或切换到演示轨迹模式。'
+        );
+      }
     }
 
     // 按顺序执行四个子 Agent，每完成一个阶段即回调进度（真实模式逐步展示思考过程）
@@ -141,7 +145,7 @@ export class AgentPipeline {
 
   /** 第一步：方案创作工程师 */
   private async runArchitect(): Promise<void> {
-    const useReal = this.config.mode === 'real' && isRealModeAvailable();
+    const useReal = this.config.mode === 'real';
 
     if (useReal) {
       // 真实模式
@@ -182,7 +186,7 @@ export class AgentPipeline {
   /** 第二步：规范校核工程师 */
   private async runCode(): Promise<void> {
     const schemeIds = this.candidateSchemes.map((s) => s.id);
-    const useReal = this.config.mode === 'real' && isRealModeAvailable();
+    const useReal = this.config.mode === 'real';
 
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
@@ -270,7 +274,7 @@ export class AgentPipeline {
   /** 第三步：经济评估工程师 */
   private async runEconomist(): Promise<void> {
     const schemeIds = this.candidateSchemes.map((s) => s.id);
-    const useReal = this.config.mode === 'real' && isRealModeAvailable();
+    const useReal = this.config.mode === 'real';
 
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
@@ -330,7 +334,7 @@ export class AgentPipeline {
   /** 第四步：总工评审 */
   private async runChief(): Promise<void> {
     const schemeIds = this.candidateSchemes.map((s) => s.id);
-    const useReal = this.config.mode === 'real' && isRealModeAvailable();
+    const useReal = this.config.mode === 'real';
 
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);

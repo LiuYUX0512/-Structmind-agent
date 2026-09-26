@@ -115,7 +115,7 @@ export class RealEngine {
 
   constructor(params: IProjectParams, weights: IWeightConfig, config?: Partial<IEngineConfig>) {
     const savedConfig = loadEngineConfig();
-    const rawEndpoint = (config?.endpoint || savedConfig.endpoint || 'https://api.deepseek.com/v1').trim();
+    const rawEndpoint = (config?.endpoint || savedConfig.endpoint || '/api/chat').trim();
     this.config = {
       mode: 'real',
       model: 'deepseek-chat',
@@ -165,13 +165,19 @@ export class RealEngine {
     const timeoutMs = 30000;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
+
+    // 代理模式判定：相对路径 endpoint（如 /api/chat）→ 走服务端安全代理（Key 只存服务端）
+    const isProxy = this.config.endpoint.startsWith('/');
+    const targetUrl = isProxy ? this.config.endpoint : `${this.config.endpoint}/chat/completions`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isProxy && this.config.apiKey) {
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
+    }
+
     try {
-      response = await fetch(`${this.config.endpoint}/chat/completions`, {
+      response = await fetch(targetUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.config.apiKey}`,
-        },
+        headers,
         body: JSON.stringify({
           model: this.config.model,
           messages,
@@ -370,5 +376,10 @@ export class RealEngine {
 /** 检查是否配置了真实模式所需的参数 */
 export function isRealModeAvailable(): boolean {
   const config = loadEngineConfig();
-  return !!(config.endpoint && config.apiKey && config.model);
+  const endpoint = config.endpoint;
+  if (!endpoint) return false;
+  // 代理模式（相对路径，如 /api/chat）：API Key 由服务端持有，前端无需配置
+  if (endpoint.startsWith('/')) return true;
+  // 直连模式：需要 endpoint + apiKey + model
+  return !!(config.apiKey && config.model);
 }

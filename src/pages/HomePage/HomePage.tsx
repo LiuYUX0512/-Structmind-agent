@@ -216,7 +216,7 @@ export default function HomePage() {
   const [isPaused, setIsPaused] = useState(false);
   const [configOpen, setConfigOpen] = useState(false);
   const [agentConfig, setAgentConfig] = useState({
-    apiBase: '',
+    apiBase: '/api/chat',
     model: 'deepseek-chat',
     apiKey: '',
     mode: 'auto' as 'auto' | 'real' | 'demo',
@@ -743,11 +743,13 @@ ${dis || '- （待补充）'}
       const extreme = checkExtremeParams(params);
       setExtremeAlert(extreme);
 
-      // 判断模式
+      // 判断模式：代理模式（/api/chat 相对路径）无需前端 Key，服务端已持有
+      const isProxy = agentConfig.apiBase.trim().startsWith('/');
       const hasKey = Boolean(agentConfig.apiKey.trim());
+      const engineReady = isProxy || hasKey;
       const useReal = 
         agentConfig.mode === 'real' ||
-        (agentConfig.mode === 'auto' && hasKey);
+        (agentConfig.mode === 'auto' && engineReady);
       setIsDemoMode(!useReal);
 
       try {
