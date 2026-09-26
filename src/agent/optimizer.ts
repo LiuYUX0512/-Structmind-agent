@@ -22,6 +22,7 @@ import {
   type IWeightConfig,
   type IRecommendation,
 } from '@/data/structure';
+import { computeSchemeScore } from './scoring';
 
 // ============ 类型定义 ============
 
@@ -158,7 +159,7 @@ export function runOptimization(
     decisionReason: '原始推荐方案，作为优化基准线。',
     scheme: { ...currentScheme },
     goalProgress: baselineProgress,
-    selfAssessment: agentSelfAssessment(goal, currentScheme, iterations, 0, maxRounds),
+    selfAssessment: agentSelfAssessment(goal, currentScheme, iterations, new Set<string>(), maxRounds, params, lockedParams),
   });
 
   // 已尝试过的杠杆（避免重复）
@@ -206,7 +207,7 @@ export function runOptimization(
     });
 
     // 6. Agent 自评：判断方案够不够好，要不要继续
-    const assessment = agentSelfAssessment(goal, accepted ? newScheme : currentScheme, iterations, triedLevers.size, maxRounds);
+    const assessment = agentSelfAssessment(goal, accepted ? newScheme : currentScheme, iterations, triedLevers, maxRounds, currentParams, lockedParams);
     iterations[iterations.length - 1].selfAssessment = assessment;
 
     // 7. 自评决定：目标已达成 / 边际效益递减 → 提前停止
@@ -711,8 +712,10 @@ function agentSelfAssessment(
   goal: IOptimizationGoal,
   currentScheme: IStructureScheme,
   iterations: IOptimizationIteration[],
-  triedLeverCount: number,
-  maxRounds: number
+  triedLevers: Set<string>,
+  maxRounds: number,
+  params: IProjectParams,
+  lockedParams?: Partial<Record<keyof IProjectParams, boolean>>
 ): NonNullable<IOptimizationIteration['selfAssessment']> {
   const progress = buildGoalProgress(goal, currentScheme, iterations[0]?.scheme?.metrics.cost);
   const goalMet = progress?.achieved ?? false;
@@ -760,8 +763,8 @@ function agentSelfAssessment(
     };
   }
 
-  // 场景 3：没有可用杠杆了 → 停止
-  const remainingLevers = estimateRemainingLevers(goal, currentScheme, triedLeverCount);
+  // 场景 3：没有可用杠杆了 → 停止（基于真实杠杆枚举探测，避免"假性无杠杆"提前停止）
+  const remainingLevers = estimateRemainingLevers(goal, currentScheme, triedLevers, params, lockedParams);
   if (remainingLevers === 0) {
     return {
       verdict: 'stop_no_levers',
@@ -820,11 +823,29 @@ function formatGoalValue(goal: IOptimizationGoal, scheme: IStructureScheme): str
   }
 }
 
-/** 估算剩余可用杠杆数量（简化判断） */
-function estimateRemainingLevers(goal: IOptimizationGoal, scheme: IStructureScheme, tried: number): number {
-  // 保守估算：总共约 5-6 个可用杠杆，减去已尝试的
-  const estimatedTotal = goal === 'cost' || goal === 'safety' ? 6 : 4;
-  return Math.max(0, estimatedTotal - tried);
+/**
+ * 探测剩余可用杠杆数量（真实枚举）：
+ * 反复调用 pickNextLever，从当前已尝试集合继续探测，直到返回 null。
+ * 该值与 agentSelfAssessment 的"无杠杆停止"判定严格一致，
+ * 避免硬编码估算（如"总共 6 个减已尝试"）造成假性停止。
+ */
+function estimateRemainingLevers(
+  goal: IOptimizationGoal,
+  scheme: IStructureScheme,
+  tried: Set<string>,
+  params: IProjectParams,
+  lockedParams?: Partial<Record<keyof IProjectParams, boolean>>
+): number {
+  const probe = new Set(tried);
+  let remaining = 0;
+  let guard = 0;
+  while (guard++ < 30) {
+    const lever = pickNextLever(goal, scheme, params, probe, lockedParams);
+    if (!lever) break;
+    probe.add(leverKey(lever));
+    remaining++;
+  }
+  return remaining;
 }
 
 /** 建议下一轮杠杆方向 */
@@ -1149,23 +1170,9 @@ export function analyzeTradeoffs(
   };
 }
 
-/** 加权综合分（越高越好） */
+/** 加权综合分（越高越好）— 统一口径见 scoring.ts，与前端、compare_schemes 完全一致 */
 function computeWeightedScore(scheme: IStructureScheme, weights: IWeightConfig): number {
-  const m = scheme.metrics;
-  // 各维度 0-10 分制，乘权重后求和
-  const costScore = 10 - ((m.cost - 2000) / 4000) * 10; // 造价越低分越高
-  const durationScore = 10 - ((m.duration - 6) / 30) * 10; // 工期越短分越高
-  const safetyScore = m.seismicPerformance;
-  const greenScore = m.carbonEmission ? 10 - ((m.carbonEmission - 200) / 800) * 10 : m.sustainability;
-
-  const total = weights.cost + weights.duration + weights.safety + weights.green || 100;
-  return (
-    (costScore * weights.cost +
-      durationScore * weights.duration +
-      safetyScore * weights.safety +
-      greenScore * weights.green) /
-    total
-  );
+  return computeSchemeScore(scheme, weights).overall;
 }
 
 

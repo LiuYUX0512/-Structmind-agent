@@ -61,6 +61,7 @@ import {
   type IOptimizationResult,
   type IOptimizationGoal,
 } from '@/agent';
+import { computeSchemeScore } from '@/agent/scoring';
 
 const STORAGE_KEY_PARAMS = '__structopt_project_params';
 const STORAGE_KEY_WEIGHTS = '__structopt_weights';
@@ -641,70 +642,24 @@ ${dis || '- （待补充）'}
     runNext();
   }, [cancelThinkingSteps]);
 
-  // Calculate weighted score - 所有维度统一归一化到 0~10 分，确保权重比例与实际影响力一致
-  // 维度：造价（逆）、工期（逆）、抗震性能（正）、施工难度（逆）、绿色综合（正）
+  // Calculate weighted score - 统一评分口径（scoring.ts 固定参考范围归一化），
+  // 与 compare_schemes / optimizer 完全一致，同一方案在任何位置得分相同
   const calculateWeightedScores = useCallback(
     (schemeList: IStructureScheme[], w: IWeightConfig) => {
       if (schemeList.length === 0) return [];
-
-      const costs = schemeList.map((s) => s.metrics.cost);
-      const durations = schemeList.map((s) => s.metrics.duration);
-      const carbons = schemeList.map((s) => s.metrics.carbonEmission);
-      const difficulties = schemeList.map((s) => s.metrics.constructionDifficulty);
-      const maxCost = Math.max(...costs);
-      const minCost = Math.min(...costs);
-      const maxDuration = Math.max(...durations);
-      const minDuration = Math.min(...durations);
-      const maxCarbon = Math.max(...carbons);
-      const minCarbon = Math.min(...carbons);
-      const maxDifficulty = Math.max(...difficulties);
-      const minDifficulty = Math.min(...difficulties);
-
-      // 归一化工具函数：正向（值越大分越高）和逆向（值越小分越高）
-      const normInverse = (val: number, min: number, max: number) =>
-        max === min ? 5 : 10 - ((val - min) / (max - min)) * 10; // 0~10，值小=分高
-
       return schemeList.map((s) => {
-        // 造价：逆指标，0~10 分
-        const costScore = normInverse(s.metrics.cost, minCost, maxCost);
-        // 工期：逆指标，0~10 分
-        const durationScore = normInverse(s.metrics.duration, minDuration, maxDuration);
-        // 抗震性能：1~10 分直接使用（已在该范围）
-        const safetyScore = Math.max(0, Math.min(10, s.metrics.seismicPerformance));
-        // 施工难度：逆指标（越易越好），0~10 分
-        const difficultyScore = normInverse(s.metrics.constructionDifficulty, minDifficulty, maxDifficulty);
-        // 碳排放：逆指标，0~10 分
-        const carbonScore = normInverse(s.metrics.carbonEmission, minCarbon, maxCarbon);
-        // 装配率：正指标，0~10 分（0~100% → 0~10）
-        const precastScore = Math.max(0, Math.min(10, s.metrics.precastRate.rate / 10));
-        // 绿色综合：可持续性(0.4) + 碳排放(0.35) + 装配率(0.25)
-        const sustainabilityScore = Math.max(0, Math.min(10, s.metrics.sustainability));
-        const greenScore =
-          sustainabilityScore * 0.4 + carbonScore * 0.35 + precastScore * 0.25;
-
-        // 总权重（safety 已隐含抗震+施工难度，按 6:4 拆分）
-        // 权重配置中的 safety 权重拆分为：抗震性能 60% + 施工难度 40%
-        const safetyComposite = safetyScore * 0.6 + difficultyScore * 0.4;
-
-        const totalWeight = w.cost + w.duration + w.safety + w.green;
-        const overallScore =
-          (costScore * w.cost +
-            durationScore * w.duration +
-            safetyComposite * w.safety +
-            greenScore * w.green) /
-          totalWeight;
-
+        const b = computeSchemeScore(s, w);
         return {
           schemeId: s.id,
           schemeName: s.name,
-          score: parseFloat(overallScore.toFixed(2)),
+          score: b.overall,
           breakdown: {
-            cost: parseFloat(costScore.toFixed(2)),
-            duration: parseFloat(durationScore.toFixed(2)),
-            safety: parseFloat(safetyComposite.toFixed(2)),
-            green: parseFloat(greenScore.toFixed(2)),
-            seismic: parseFloat(safetyScore.toFixed(2)),
-            difficulty: parseFloat(difficultyScore.toFixed(2)),
+            cost: b.cost,
+            duration: b.duration,
+            safety: b.safety,
+            green: b.green,
+            seismic: b.seismic,
+            difficulty: b.difficulty,
           },
         };
       });
@@ -808,15 +763,24 @@ ${dis || '- （待补充）'}
           : { mode: 'trace' as const, maxSteps: 20 };
 
         // 完整管线运行
+        // 真实模式：每个子 Agent 阶段完成即回调 onProgress，UI 逐步追加日志并点亮对应 Agent 卡片，
+        // 让用户看到"正在思考 → 调用工具 → 得出结论"的完整过程，而非一次性输出
         const result: IAgentPipelineResult = await runAgentPipeline(
           params,
           w,
-          engineConfig
+          engineConfig,
+          useReal
+            ? (logs, agentIndex) => {
+                if (controller.signal.aborted) return;
+                setActionLog(logs);
+                setCurrentAgentIndex(agentIndex);
+              }
+            : undefined
         );
 
         if (controller.signal.aborted) return;
 
-        // 一次性设置 actionLog（演示模式是同步的，未来可以做流式）
+        // 兜底：确保最终日志完整落盘（真实模式异常回退等场景）
         setActionLog(result.actionLog);
         setCurrentAgentIndex(4);
 
@@ -1097,12 +1061,14 @@ ${dis || '- （待补充）'}
        if (fullResult.summary.acceptedRounds > 0) {
          const finalSchemes = [finalScheme, ...schemes.filter((s) => s.id !== finalScheme.id)];
          setSchemes(finalSchemes);
+         // 重新计算优化后方案的综合得分，保证「推荐方案得分」与「方案卡片」一致
+         const updatedWeightedScores = calculateWeightedScores(finalSchemes, weights);
          setRecommendation({
            schemeId: finalScheme.id,
            schemeName: finalScheme.name,
            reason: recommendation.reason + `\n\n> **自主优化结果**：经过 ${fullResult.summary.totalRounds} 轮迭代，${fullResult.summary.keyInsight}。`,
-           overallScore: recommendation.overallScore,
-           weightedScores: recommendation.weightedScores,
+           overallScore: updatedWeightedScores.find((r) => r.schemeId === finalScheme.id)?.score ?? recommendation.overallScore,
+           weightedScores: updatedWeightedScores,
          });
        }
 
@@ -1369,7 +1335,7 @@ ${dis || '- （待补充）'}
         <HeroSection
           onStart={scrollToParams}
           params={projectParams}
-          scheme={schemes.find((s) => s.id === selectedSchemeId) || recommendation ? schemes[0] : null}
+          scheme={schemes.find((s) => s.id === selectedSchemeId) || (recommendation ? schemes[0] : null)}
         />
          <ParamsSection
            onGenerate={handleGenerate}

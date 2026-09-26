@@ -21,6 +21,8 @@ export interface IAgentActionLog {
   args?: Record<string, unknown>;
   /** 工具执行结果（type = tool_result 时） */
   result?: unknown;
+  /** 工具调用唯一 ID（type = tool_call / tool_result 时，用于将调用与结果精确配对） */
+  toolCallId?: string;
   /** 时间戳 */
   timestamp?: number;
 }

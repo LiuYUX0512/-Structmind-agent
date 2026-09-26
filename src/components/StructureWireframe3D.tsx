@@ -926,29 +926,51 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
   // 用 zoom=1 的基准投影计算模型实际包围盒（含标注点），加 padding；
   // 再除以当前 zoom —— 放大看细节、缩小看全貌，任何楼层高度都完整显示
   const pad = 30;
+  // bbox 使用固定角度的独立投影计算（不依赖 rotateAngle/zoom，旋转/缩放时 viewBox 不跳动），
+  // 并对 0°/45°/90° 取包围盒并集，保证任意旋转角度下模型都完整落在可视范围内
   const bbox = useMemo(() => {
+    const baseScale = Math.min(
+      240 / Math.max(geom.totalWidth, geom.totalDepth),
+      200 / geom.totalHeight
+    );
+    const tilt = 0.42;
     const ext = 1.2;
-    const pts: [number, number][] = [
-      project(-ext, 0, -ext, 1),
-      project(geom.totalWidth + ext, 0, -ext, 1),
-      project(geom.totalWidth + ext, 0, geom.totalDepth + ext, 1),
-      project(-ext, 0, geom.totalDepth + ext, 1),
-      project(-ext, geom.totalHeight, -ext, 1),
-      project(geom.totalWidth + ext, geom.totalHeight, -ext, 1),
-      project(geom.totalWidth + ext, geom.totalHeight, geom.totalDepth + ext, 1),
-      project(-ext, geom.totalHeight, geom.totalDepth + ext, 1),
+    const pts3d: [number, number, number][] = [
+      [-ext, 0, -ext],
+      [geom.totalWidth + ext, 0, -ext],
+      [geom.totalWidth + ext, 0, geom.totalDepth + ext],
+      [-ext, 0, geom.totalDepth + ext],
+      [-ext, geom.totalHeight, -ext],
+      [geom.totalWidth + ext, geom.totalHeight, -ext],
+      [geom.totalWidth + ext, geom.totalHeight, geom.totalDepth + ext],
+      [-ext, geom.totalHeight, geom.totalDepth + ext],
       // 高度标注线上下端点
-      project(geom.totalWidth + 0.5, geom.totalHeight, geom.totalDepth + 0.5, 1),
-      project(geom.totalWidth + 0.5, 0, geom.totalDepth + 0.5, 1),
+      [geom.totalWidth + 0.5, geom.totalHeight, geom.totalDepth + 0.5],
+      [geom.totalWidth + 0.5, 0, geom.totalDepth + 0.5],
       // 底部加强区标注点
-      project(geom.totalWidth / 2, reinforceFloors * geom.floorHeight / 2, geom.totalDepth + 1, 1),
+      [geom.totalWidth / 2, reinforceFloors * geom.floorHeight / 2, geom.totalDepth + 1],
     ];
+    const cx = geom.totalWidth / 2;
+    const cz = geom.totalDepth / 2;
+    const projectFixed = (x: number, y: number, z: number, angleDeg: number): [number, number] => {
+      const angleY = (angleDeg * Math.PI) / 180;
+      const dx = x - cx;
+      const dz = z - cz;
+      const rx = dx * Math.cos(angleY) + dz * Math.sin(angleY);
+      const rz = -dx * Math.sin(angleY) + dz * Math.cos(angleY);
+      const sx = rx * baseScale;
+      const sy = -y * baseScale * (1 - tilt * 0.5) + rz * baseScale * tilt;
+      return [sx, sy];
+    };
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const [x, y] of pts) {
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+    for (const angle of [0, 45, 90]) {
+      for (const [x, y, z] of pts3d) {
+        const [px, py] = projectFixed(x, y, z, angle);
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
     }
     // 兜底：任何情况下都不为空
     if (!isFinite(minX) || !isFinite(minY)) {
@@ -960,7 +982,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       w: maxX - minX + pad * 2,
       h: maxY - minY + pad * 2,
     };
-  }, [project, geom, reinforceFloors]);
+  }, [geom, reinforceFloors]);
 
   // 应用用户缩放：viewBox 尺寸缩小 = 放大显示（以中心为锚点）
   const vbX = bbox.x + bbox.w * 0.5 - (bbox.w / zoom) * 0.5;

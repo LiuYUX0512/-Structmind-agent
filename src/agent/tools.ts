@@ -17,6 +17,7 @@ import {
   type INormCompliance,
   type IFoundationSuggestion,
 } from '@/data/structure';
+import { computeSchemeScore } from './scoring';
 
 /** 工具参数属性定义（JSON Schema 子集） */
 export interface IToolParamProperty {
@@ -319,7 +320,7 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
           source: c.source,
         })),
         summary:
-          systemId === 'steel' || systemId === 'precast-steel' || systemId === 'mass-timber'
+          systemId === 'steel' || systemId === 'prefab-steel' || systemId === 'mass-timber'
             ? `该结构体系（${systemName}）防火性能需专项设计，钢结构需做防火涂料保护，木结构需满足木结构建筑防火专项要求。`
             : `该结构体系（${systemName}）具有良好的耐火性能，按${fireResistanceGrade}耐火等级设计即可满足 GB 55037-2022 要求。`,
         passCount: fireChecks.filter((c) => c.status === 'pass').length,
@@ -842,76 +843,33 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
       const filtered = allSchemes.filter((s) => schemeIds.includes(s.id));
       const schemes = filtered.length > 0 ? filtered : allSchemes;
 
-      // 归一化函数
-      const normalize = (value: number, min: number, max: number, inverse = false) => {
-        if (max === min) return 5;
-        const score = ((value - min) / (max - min)) * 10;
-        return inverse ? 10 - score : score;
-      };
+      const weightTotal = (w.cost || 0) + (w.duration || 0) + (w.safety || 0) + (w.green || 0) || 100;
 
-      const costs = schemes.map((s) => s.metrics.cost);
-      const durations = schemes.map((s) => s.metrics.duration);
-      const seismicScores = schemes.map((s) => s.metrics.seismicPerformance);
-      const difficulties = schemes.map((s) => s.metrics.constructionDifficulty);
-      const sustainabilityScores = schemes.map((s) => s.metrics.sustainability);
-      const carbons = schemes.map((s) => s.metrics.carbonEmission);
-      const precastRates = schemes.map((s) => s.metrics.precastRate.rate);
-
-      const minCost = Math.min(...costs);
-      const maxCost = Math.max(...costs);
-      const minDuration = Math.min(...durations);
-      const maxDuration = Math.max(...durations);
-      const minSeismic = Math.min(...seismicScores);
-      const maxSeismic = Math.max(...seismicScores);
-      const minDifficulty = Math.min(...difficulties);
-      const maxDifficulty = Math.max(...difficulties);
-      const minSustain = Math.min(...sustainabilityScores);
-      const maxSustain = Math.max(...sustainabilityScores);
-      const minCarbon = Math.min(...carbons);
-      const maxCarbon = Math.max(...carbons);
-      const minPrecast = Math.min(...precastRates);
-      const maxPrecast = Math.max(...precastRates);
-
-      const weightTotal = (w.cost || 0) + (w.duration || 0) + (w.safety || 0) + (w.green || 0) || 1;
-
+      // 统一评分口径：使用固定参考范围归一化（与前端、优化器一致），
+      // 保证同一方案在任何调用方得到同一分数
       const results = schemes.map((s) => {
-        const costScore = normalize(s.metrics.cost, minCost, maxCost, true);
-        const durationScore = normalize(s.metrics.duration, minDuration, maxDuration, true);
-        const seismicScore = normalize(s.metrics.seismicPerformance, minSeismic, maxSeismic, false);
-        const difficultyScore = normalize(s.metrics.constructionDifficulty, minDifficulty, maxDifficulty, true);
-        const sustainScore = normalize(s.metrics.sustainability, minSustain, maxSustain, false);
-        const carbonScore = normalize(s.metrics.carbonEmission, minCarbon, maxCarbon, true);
-        const precastScore = normalize(s.metrics.precastRate.rate, minPrecast, maxPrecast, false);
-
-        // 安全 = 抗震60% + 施工难度(越低越好)40%
-        const safetyScore = seismicScore * 0.6 + difficultyScore * 0.4;
-        // 绿色 = 可持续性40% + 碳排35% + 装配率25%
-        const greenScore = sustainScore * 0.4 + carbonScore * 0.35 + precastScore * 0.25;
-        // 性能 = 抗震 + 可持续平均
-        const performanceScore = (seismicScore + sustainScore) / 2;
-
-        const total = (
-          costScore * (w.cost || 0) +
-          durationScore * (w.duration || 0) +
-          safetyScore * (w.safety || 0) +
-          greenScore * (w.green || 0)
-        ) / weightTotal;
+        const b = computeSchemeScore(s, {
+          cost: w.cost || 0,
+          duration: w.duration || 0,
+          safety: w.safety || 0,
+          green: w.green || 0,
+        });
 
         return {
           schemeId: s.id,
           schemeName: s.name,
-          score: Math.round(total * 10) / 10,
+          score: b.overall,
           breakdown: {
-            造价经济: Math.round(costScore * 10) / 10,
-            工期优势: Math.round(durationScore * 10) / 10,
-            安全抗震: Math.round(safetyScore * 10) / 10,
-            绿色低碳: Math.round(greenScore * 10) / 10,
-            抗震性能: Math.round(seismicScore * 10) / 10,
-            施工难度: Math.round(difficultyScore * 10) / 10,
-            可持续性: Math.round(sustainScore * 10) / 10,
-            碳排放: Math.round(carbonScore * 10) / 10,
-            装配率: Math.round(precastScore * 10) / 10,
-            综合性能: Math.round(performanceScore * 10) / 10,
+            造价经济: b.cost,
+            工期优势: b.duration,
+            安全抗震: b.safety,
+            绿色低碳: b.green,
+            抗震性能: b.seismic,
+            施工难度: b.difficulty,
+            可持续性: b.sustain,
+            碳排放: b.carbon,
+            装配率: b.precast,
+            综合性能: b.performance,
           },
           metrics: {
             cost: s.metrics.cost,

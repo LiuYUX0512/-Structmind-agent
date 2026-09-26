@@ -39,7 +39,7 @@ import type {
   IStructureScheme,
   IExtremeParamAlert,
 } from '@/data/structure';
-import type { IAgentActionLog, AgentType } from '@/agent/types';
+import { SUB_AGENT_SPECS, type IAgentActionLog, type AgentType } from '@/agent/types';
 import type { AgentActionTimelineRef } from '@/components/AgentActionTimeline';
 import { useActionPlayer } from '@/hooks/use-action-player';
 
@@ -442,6 +442,32 @@ function SchemesSection({
               </div>
             </CardHeader>
             <CardContent className="pt-0">
+              {/* 点击了尚未启动/无日志的 Agent 时，展示其角色说明，避免"点了没反应" */}
+              {selectedAgent && displayLogs.filter((l) => l.agent === selectedAgent).length === 0 && (
+                <div className="mb-3 rounded-lg border border-border/50 bg-card/60 p-4">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="font-mono text-[10px] font-bold tracking-wider text-primary">
+                      {SUB_AGENT_SPECS[selectedAgent].id.toUpperCase()}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {SUB_AGENT_SPECS[selectedAgent].name}
+                    </span>
+                    <Badge variant="outline" className="border-border/40 text-[9px] font-mono text-muted-foreground">
+                      {SUB_AGENT_SPECS[selectedAgent].title}
+                    </Badge>
+                  </div>
+                  <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
+                    {SUB_AGENT_SPECS[selectedAgent].description}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SUB_AGENT_SPECS[selectedAgent].allowedTools.map((t) => (
+                      <span key={t} className="rounded border border-border/40 bg-muted/40 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <AgentActionTimeline
                 ref={timelineRef}
                 logs={displayLogs}

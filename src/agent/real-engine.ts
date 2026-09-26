@@ -13,6 +13,25 @@ import { scopedStorage } from '@lark-apaas/client-toolkit-lite';
 
 const CONFIG_STORAGE_KEY = 'agent_engine_config';
 
+/**
+ * 规范化 API Endpoint：
+ * - 去掉尾部斜杠
+ * - 裸域名（path 为空或 '/'）自动补 /v1（OpenAI 兼容协议惯例）
+ * 避免用户填 https://api.deepseek.com 时拼接出 /chat/completions 404
+ */
+export function normalizeEndpoint(endpoint: string): string {
+  let url = endpoint.trim().replace(/\/+$/, '');
+  try {
+    const u = new URL(url);
+    if (u.pathname === '' || u.pathname === '/') {
+      url = url + '/v1';
+    }
+  } catch {
+    // 非法 URL：原样返回，让请求阶段报错
+  }
+  return url;
+}
+
 export function saveEngineConfig(config: Partial<IEngineConfig>): void {
   try {
     const existing = loadEngineConfig();
@@ -95,14 +114,15 @@ export class RealEngine {
 
   constructor(params: IProjectParams, weights: IWeightConfig, config?: Partial<IEngineConfig>) {
     const savedConfig = loadEngineConfig();
+    const rawEndpoint = (config?.endpoint || savedConfig.endpoint || 'https://api.deepseek.com/v1').trim();
     this.config = {
       mode: 'real',
-      endpoint: 'https://api.deepseek.com/v1',
       model: 'deepseek-chat',
       maxSteps: 20,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       ...savedConfig,
       ...config,
+      endpoint: normalizeEndpoint(rawEndpoint),
     };
     this.params = params;
     this.weights = weights;
@@ -140,21 +160,37 @@ export class RealEngine {
       throw new Error('未配置 API Endpoint 或 API Key');
     }
 
-    const response = await fetch(`${this.config.endpoint}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: this.config.model,
-        messages,
-        tools: this.buildToolsDefinition(),
-        tool_choice: 'auto',
-        temperature: 0.3,
-        stream: false,
-      }),
-    });
+    const controller = new AbortController();
+    const timeoutMs = 30000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(`${this.config.endpoint}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.config.model,
+          messages,
+          tools: this.buildToolsDefinition(),
+          tool_choice: 'auto',
+          temperature: 0.3,
+          stream: false,
+        }),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      const aborted = (e as Error)?.name === 'AbortError';
+      throw new Error(
+        aborted
+          ? `LLM 请求超时（${timeoutMs / 1000}s），请检查网络或 API 服务状态`
+          : `LLM 请求失败：${String(e).slice(0, 200)}`
+      );
+    }
+    clearTimeout(timer);
 
     if (!response.ok) {
       const text = await response.text();
@@ -179,24 +215,35 @@ export class RealEngine {
     function: { name: string; arguments: string };
   }): Promise<ILLMMessage> {
     const { name, arguments: argsStr } = toolCall.function;
+    const toolCallId = toolCall.id;
     let args: Record<string, unknown> = {};
 
-    try {
-      args = JSON.parse(argsStr);
-    } catch {
-      return {
-        role: 'tool',
-        tool_call_id: toolCall.id,
-        content: JSON.stringify({ error: '参数解析失败，不是合法 JSON' }),
-      };
-    }
-
+    // 无论参数解析是否成功，都先记录 tool_call 日志，保证 tool_call/tool_result 严格 1:1 可配对
     this.pushLog({
       type: 'tool_call',
       content: `调用工具：${name}`,
       tool: name,
       args,
+      toolCallId,
     });
+
+    try {
+      args = JSON.parse(argsStr);
+    } catch {
+      const errMsg = '参数解析失败，不是合法 JSON';
+      this.pushLog({
+        type: 'tool_result',
+        content: `工具 ${name} 执行失败：${errMsg}`,
+        tool: name,
+        result: { error: errMsg },
+        toolCallId,
+      });
+      return {
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify({ error: errMsg }),
+      };
+    }
 
     try {
       const result = executeToolByName(name, args);
@@ -207,6 +254,7 @@ export class RealEngine {
         content: `工具 ${name} 执行完成`,
         tool: name,
         result: result as unknown,
+        toolCallId,
       });
 
       return {
@@ -223,6 +271,7 @@ export class RealEngine {
         content: `工具 ${name} 执行失败：${errMsg}`,
         tool: name,
         result: { error: errMsg },
+        toolCallId,
       });
       return {
         role: 'tool',

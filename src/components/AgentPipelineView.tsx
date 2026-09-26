@@ -153,7 +153,8 @@ function AgentPipelineView({
           const status = getAgentStatus(idx);
           const summary = getAgentSummary(idx);
           const isSelected = selectedAgent === agentId;
-          const isClickable = status !== 'pending';
+          // 全部卡片可点：点击即可查看该 Agent 的角色说明 / 聚焦其时间线，pending 卡片同样可点
+          const isClickable = true;
           const showStrongBreath = status === 'warning' && !warningViewedAgents.has(agentId);
           const theme = AGENT_THEME[agentId as keyof typeof AGENT_THEME];
           const code = AGENT_CODES[agentId as keyof typeof AGENT_CODES];
@@ -309,7 +310,7 @@ function AgentPipelineView({
                   {isClickable && (
                     <div className="mt-2 flex items-center justify-end">
                       <span className={`font-mono text-[8px] tracking-wider transition-colors group-hover:${theme.text} text-muted-foreground/60`}>
-                        点击查看 →
+                        {status === 'pending' ? '点击查看角色 →' : '点击查看 →'}
                       </span>
                     </div>
                   )}

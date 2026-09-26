@@ -31,6 +31,46 @@ ${paramStr}
 请开始你的工作。`;
 }
 
+/**
+ * 从总工 Markdown 结论中提取建议结构（real 模式 Chief 未返回结构化 advice 时兜底，
+ * 避免界面"下一步建议"区域空白）
+ */
+function extractAdviceFromMarkdown(md: string): IAgentPipelineResult['advice'] {
+  const advice: IAgentPipelineResult['advice'] = { pros: [], cons: [], nextSteps: [] };
+  if (!md) return advice;
+
+  // 按小节标题提取正文（支持 "## 3. 推荐理由" / "**推荐理由**" 等常见形态）
+  const section = (title: string): string => {
+    const esc = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:#{1,6}\s*)?[\d.]*\s*${esc}[^\n]*\n([\s\S]*?)(?=\n\s*(?:#{1,6}|$))`, 'i');
+    const m = md.match(re);
+    return m ? m[1].trim() : '';
+  };
+
+  const pickLines = (text: string): string[] =>
+    text
+      .split('\n')
+      .map((l) => l.replace(/^[-•*]\s*/, '').trim())
+      .filter((l) => l && !l.startsWith('#') && l.length < 120)
+      .slice(0, 5);
+
+  const prosText = section('推荐理由');
+  if (prosText) advice.pros = pickLines(prosText);
+  const consText = section('各方案优劣势对比') || section('风险提示') || section('风险');
+  if (consText) advice.cons = pickLines(consText);
+  const nextText = section('下一步优化建议') || section('下一步建议');
+  if (nextText) advice.nextSteps = pickLines(nextText);
+
+  // 兜底：从全文提取关键句
+  if (advice.pros.length === 0 && advice.nextSteps.length === 0) {
+    const lines = md
+      .split('\n')
+      .filter((l) => /推荐|建议|应当|需要|注意/.test(l) && l.trim().length > 8 && l.trim().length < 100);
+    if (lines.length > 0) advice.nextSteps = lines.slice(0, 4);
+  }
+  return advice;
+}
+
 // ============ Agent Pipeline 主类 ============
 
 export class AgentPipeline {
@@ -55,10 +95,23 @@ export class AgentPipeline {
     allPass: boolean;
   } | null = null;
 
-  constructor(params: IProjectParams, weights?: IWeightConfig, config?: Partial<IEngineConfig>) {
+  private onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void;
+
+  constructor(
+    params: IProjectParams,
+    weights?: IWeightConfig,
+    config?: Partial<IEngineConfig>,
+    onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void
+  ) {
     this.params = params;
     this.weights = weights || MOCK_WEIGHT_CONFIG;
     this.config = config || {};
+    this.onProgress = onProgress;
+  }
+
+  /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
+  private emitProgress(agentIndex: number): void {
+    this.onProgress?.([...this.actionLog], agentIndex);
   }
 
   /** 运行完整管线 */
@@ -70,11 +123,15 @@ export class AgentPipeline {
       );
     }
 
-    // 按顺序执行四个子 Agent
+    // 按顺序执行四个子 Agent，每完成一个阶段即回调进度（真实模式逐步展示思考过程）
     await this.runArchitect();
+    this.emitProgress(1);
     await this.runCode();
+    this.emitProgress(2);
     await this.runEconomist();
+    this.emitProgress(3);
     await this.runChief();
+    this.emitProgress(4);
 
     if (!this.finalResult) {
       throw new Error('管线运行异常，未生成最终结果');
@@ -135,34 +192,36 @@ export class AgentPipeline {
       const result = await engine.run(prompt, 'code');
 
       // 尝试从日志中提取 codeChecks
-      const seisResults = engine.getActionLog().filter(
-        (log) => log.tool === 'check_seismic_requirements' && log.type === 'tool_result'
-      );
-      const fireResults = engine.getActionLog().filter(
-        (log) => log.tool === 'check_fire_requirements' && log.type === 'tool_result'
-      );
-      // 从 tool_call 日志中取 args.systemId，与 tool_result 日志按调用顺序对应
-      // （RealEngine 串行执行工具，tool_call 顺序与 tool_result 顺序一致）
-      const seisCallLogs = engine.getActionLog().filter(
+      const allLogs = engine.getActionLog();
+      const seisCallLogs = allLogs.filter(
         (log) => log.tool === 'check_seismic_requirements' && log.type === 'tool_call'
       );
-      const fireCallLogs = engine.getActionLog().filter(
+      const fireCallLogs = allLogs.filter(
         (log) => log.tool === 'check_fire_requirements' && log.type === 'tool_call'
       );
-      const seisResultBySysId = new Map<string, unknown>();
-      const fireResultBySysId = new Map<string, unknown>();
-      seisCallLogs.forEach((call, idx) => {
-        const sysId = call.args?.systemId as string | undefined;
-        if (sysId && seisResults[idx]) {
-          seisResultBySysId.set(sysId, seisResults[idx].result);
-        }
-      });
-      fireCallLogs.forEach((call, idx) => {
-        const sysId = call.args?.systemId as string | undefined;
-        if (sysId && fireResults[idx]) {
-          fireResultBySysId.set(sysId, fireResults[idx].result);
-        }
-      });
+      const seisResults = allLogs.filter(
+        (log) => log.tool === 'check_seismic_requirements' && log.type === 'tool_result'
+      );
+      const fireResults = allLogs.filter(
+        (log) => log.tool === 'check_fire_requirements' && log.type === 'tool_result'
+      );
+      // 用 toolCallId 精确配对调用与结果（fallback：按顺序 index），避免交错/缺失导致错位
+      const pairByCallId = (calls: IAgentPipelineResult['actionLog'], results: IAgentPipelineResult['actionLog']) => {
+        const resultByCallId = new Map<string, unknown>();
+        results.forEach((r) => {
+          if (r.toolCallId) resultByCallId.set(r.toolCallId, r.result);
+        });
+        const out = new Map<string, unknown>();
+        calls.forEach((call, idx) => {
+          const sysId = call.args?.systemId as string | undefined;
+          if (!sysId) return;
+          const result = call.toolCallId ? resultByCallId.get(call.toolCallId) : results[idx]?.result;
+          if (result !== undefined) out.set(sysId, result);
+        });
+        return out;
+      };
+      const seisResultBySysId = pairByCallId(seisCallLogs, seisResults);
+      const fireResultBySysId = pairByCallId(fireCallLogs, fireResults);
       schemeIds.forEach((id) => {
         this.codeChecks[id] = {
           seismic: seisResultBySysId.get(id) || null,
@@ -220,8 +279,8 @@ export class AgentPipeline {
         '\n请对每个候选方案逐一调用 estimate_cost、estimate_schedule、estimate_precast_rate、estimate_carbon、assess_construction_risk 工具进行经济与绿色指标评估。';
       const result = await engine.run(prompt, 'economist');
 
-      // 匹配 metrics：从 tool_call 日志取 args.systemId，与 tool_result 日志按工具名+顺序对应
-      // （RealEngine 串行执行工具，tool_call 顺序与 tool_result 顺序一致）
+      // 匹配 metrics：用 toolCallId 精确配对「systemId + toolName → result」，
+      // 避免调用交错或某次结果缺失导致错位（fallback：按顺序 index）
       const toolNames = ['estimate_cost', 'estimate_schedule', 'estimate_precast_rate', 'estimate_carbon', 'assess_construction_risk'] as const;
       const callLogs = engine.getActionLog().filter(
         (log) => log.type === 'tool_call' && toolNames.includes(log.tool as typeof toolNames[number])
@@ -229,12 +288,16 @@ export class AgentPipeline {
       const resultLogs = engine.getActionLog().filter(
         (log) => log.type === 'tool_result' && toolNames.includes(log.tool as typeof toolNames[number])
       );
-      // 建立「systemId + toolName → result」映射
+      const resultByCallId = new Map<string, unknown>();
+      resultLogs.forEach((r) => {
+        if (r.toolCallId) resultByCallId.set(r.toolCallId, r.result);
+      });
       const resultMap = new Map<string, unknown>();
       callLogs.forEach((call, idx) => {
         const sysId = call.args?.systemId as string | undefined;
-        if (sysId && call.tool && resultLogs[idx]) {
-          resultMap.set(`${sysId}:${call.tool}`, resultLogs[idx].result);
+        if (sysId && call.tool) {
+          const result = call.toolCallId ? resultByCallId.get(call.toolCallId) : resultLogs[idx]?.result;
+          if (result !== undefined) resultMap.set(`${sysId}:${call.tool}`, result);
         }
       });
       schemeIds.forEach((id) => {
@@ -316,11 +379,7 @@ export class AgentPipeline {
         ranking: compareResult?.ranking || [],
         codeChecks: this.codeChecks,
         metrics: this.metrics,
-        advice: {
-          pros: [],
-          cons: [],
-          nextSteps: [],
-        },
+        advice: extractAdviceFromMarkdown(result.finalAnswer || ''),
         actionLog: [...this.actionLog],
         conclusions: [...this.conclusions],
       };
@@ -367,8 +426,9 @@ export class AgentPipeline {
 export async function runAgentPipeline(
   params: IProjectParams,
   weights?: IWeightConfig,
-  config?: Partial<IEngineConfig>
+  config?: Partial<IEngineConfig>,
+  onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void
 ): Promise<IAgentPipelineResult> {
-  const pipeline = new AgentPipeline(params, weights, config);
+  const pipeline = new AgentPipeline(params, weights, config, onProgress);
   return pipeline.run();
 }
