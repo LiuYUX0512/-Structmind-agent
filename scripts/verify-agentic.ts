@@ -176,7 +176,9 @@ const buildMockResponse = (messages: any[]): any => {
 ### 4.4 改进方向
 下一轮可补充基础方案比选。
 ## 5. ⚠️ 风险提示
-剪力墙布置是关键风险点；烈度提高时需重新评估。
+- 最可能出问题：剪力墙布置是关键风险点
+- 什么情况下需要重新评估（触发条件）：当设防烈度提高或建筑高度增加时
+- 后续深化设计时重点关注：节点构造与配筋
 ## 6. 下一步优化建议
 - 优化剪力墙布置
 - 对比基础方案`,
@@ -386,6 +388,123 @@ async function scenarioShuffle() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+// ---------- 场景 5：人类在环（HITL） ----------
+async function scenarioHitl() {
+  callSeq = 0;
+  architectRedone = false;
+  shuffleCode = false;
+  installToolPatches();
+
+  // 覆盖重出候选：返回不含 shearwall（验证 pipeline 对锁定方案强制保留，工程师锁超越 LLM）
+  const queryTool = TOOL_REGISTRY.find((t) => t.name === 'query_structure_systems')!;
+  const origQuery = queryTool.executor;
+  queryTool.executor = ((args: Record<string, unknown>) => {
+    const preferPass = !!(args.filters as Record<string, unknown>)?.preferPass;
+    if (preferPass) {
+      const ids = ['frame-shearwall', 'steel'];
+      return {
+        candidates: ids.map((id) => ({ id, name: id, description: 'mock' })),
+        filters: args.filters,
+      };
+    }
+    return origQuery(args);
+  }) as typeof queryTool.executor;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const body = JSON.parse(String(init?.body));
+    const message = buildMockResponse(body.messages);
+    return new Response(
+      JSON.stringify({ choices: [{ message }], usage: { total_tokens: 0 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await runAgentPipeline(
+    PARAMS,
+    undefined,
+    { mode: 'real', endpoint: 'https://api.deepseek.com/v1', apiKey: 'sk-mock-not-real', model: 'deepseek-chat', maxSteps: 20 },
+    undefined,
+    undefined,
+    { lockedSchemeIds: ['shearwall'], budgetCap: 100, notes: '优先考虑装配式施工' }
+  );
+  globalThis.fetch = originalFetch;
+  queryTool.executor = origQuery;
+
+  const logs = result.actionLog.map((l: any) => String(l.content || ''));
+  const hasBudgetLog = logs.some((l) => l.includes('人工设定预算上限 100 万元'));
+  const hasLockLog = logs.some((l) => l.includes('人工锁定方案'));
+  const hasNoteLog = logs.some((l) => l.includes('人工备注'));
+  const shearwallKept = result.schemes.some((sc: any) => sc.id === 'shearwall');
+  const risks = result.advice?.risks || [];
+  const hasBudgetRisk = risks.some((r: string) => r.includes('预算超限'));
+  const exceeded = result.budgetExceeded || [];
+
+  const checks: Array<[string, boolean, string]> = [
+    ['干预日志：预算上限已写入 actionLog', hasBudgetLog, `found=${hasBudgetLog}`],
+    ['干预日志：锁定方案已写入 actionLog', hasLockLog, `found=${hasLockLog}`],
+    ['干预日志：人工备注已写入 actionLog', hasNoteLog, `found=${hasNoteLog}`],
+    ['锁定方案强制保留（LLM 重出未返回也补回）', shearwallKept, `schemes=${result.schemes.map((s: any) => s.id).join(',')}`],
+    ['预算超限已机械化判定（budgetExceeded）', exceeded.length > 0, `exceeded=${exceeded.join(',')}`],
+    ['advice.risks 如实反映预算风险', hasBudgetRisk, `risks=${risks.length}`],
+    ['无降级（HITL 全程真实模式）', !result.degraded, `degraded=${JSON.stringify(result.degraded)}`],
+    ['结论完整', result.conclusions.length >= 6, `conclusions=${result.conclusions.length}`],
+  ];
+
+  console.log('\n===== 场景 5：人类在环（HITL）干预 =====\n');
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
+// ---------- 场景 6：Chief 结构化输出（反思/风险/置信度解析） ----------
+async function scenarioChiefStructured() {
+  callSeq = 0;
+  architectRedone = false;
+  shuffleCode = false;
+  installToolPatches();
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const body = JSON.parse(String(init?.body));
+    const message = buildMockResponse(body.messages);
+    return new Response(
+      JSON.stringify({ choices: [{ message }], usage: { total_tokens: 0 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await runAgentPipeline(
+    PARAMS,
+    undefined,
+    { mode: 'real', endpoint: 'https://api.deepseek.com/v1', apiKey: 'sk-mock-not-real', model: 'deepseek-chat', maxSteps: 20 }
+  );
+  globalThis.fetch = originalFetch;
+
+  const advice = result.advice;
+  const checks: Array<[string, boolean, string]> = [
+    ['advice.pros 从"推荐理由"解析', (advice?.pros || []).length > 0, `pros=${advice?.pros?.length}`],
+    ['advice.cons 从"优劣势对比"解析', (advice?.cons || []).length > 0, `cons=${advice?.cons?.length}`],
+    ['advice.nextSteps 解析', (advice?.nextSteps || []).length > 0, `next=${advice?.nextSteps?.length}`],
+    ['advice.risks 从"风险提示"解析', (advice?.risks || []).length > 0, `risks=${JSON.stringify(advice?.risks)}`],
+    ['advice.riskTriggers 从"触发条件"解析', (advice?.riskTriggers || []).length > 0, `triggers=${advice?.riskTriggers?.length}`],
+    ['advice.confidence 解析出等级', !!advice?.confidence?.level, `level=${advice?.confidence?.level}`],
+    ['confidence 带理由', (advice?.confidence?.reason || '').length > 6, `reason=${(advice?.confidence?.reason || '').slice(0, 30)}`],
+    ['无降级', !result.degraded, `degraded=${JSON.stringify(result.degraded)}`],
+  ];
+
+  console.log('\n===== 场景 6：Chief 结构化输出（反思/风险/置信度） =====\n');
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 场景 4：LLM 请求自动重试（网络抖动/5xx 不崩管线） ----------
 async function scenarioRetry() {
   callSeq = 0;
@@ -446,10 +565,12 @@ const r1 = await scenarioRecheck();
 const r2 = await scenarioDegrade();
 const r3 = await scenarioShuffle();
 const r4 = await scenarioRetry();
+const r5 = await scenarioHitl();
+const r6 = await scenarioChiefStructured();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} ----`);
-if (r1.ok && r2.ok && r3.ok && r4.ok) {
-  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化输出');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

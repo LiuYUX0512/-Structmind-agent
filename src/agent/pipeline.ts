@@ -11,6 +11,7 @@ import {
   type IAgentPipelineResult,
   type AgentType,
   type IEngineConfig,
+  type IHumanOverrides,
 } from './types';
 import type { IProjectParams, IWeightConfig, IStructureScheme } from '@/data/structure';
 import { STRUCTURE_SYSTEM_LIBRARY, MOCK_WEIGHT_CONFIG } from '@/data/structure';
@@ -42,7 +43,8 @@ function extractAdviceFromMarkdown(md: string): IAgentPipelineResult['advice'] {
   // 按小节标题提取正文（支持 "## 3. 推荐理由" / "**推荐理由**" 等常见形态）
   const section = (title: string): string => {
     const esc = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?:#{1,6}\\s*)?[\\d.]*\\s*${esc}[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{1,6}|$)|$)`, 'i');
+    // 标题行允许任意前缀/后缀（如 "**⚠️ 风险提示**"、"## 4. 反思与风险提示"），只要包含关键词即命中
+    const re = new RegExp(`(?:#{1,6}\\s*)?[\\d.]*[^\\n]*${esc}[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{1,6}|$)|$)`, 'i');
     const m = md.match(re);
     return m ? m[1].trim() : '';
   };
@@ -60,6 +62,27 @@ function extractAdviceFromMarkdown(md: string): IAgentPipelineResult['advice'] {
   if (consText) advice.cons = pickLines(consText);
   const nextText = section('下一步优化建议') || section('下一步建议');
   if (nextText) advice.nextSteps = pickLines(nextText);
+
+  // ===== Chief 结构化输出升级：反思/风险/触发条件/置信度 =====
+  const risksText = section('风险提示') || section('⚠️ 风险提示') || section('风险');
+  if (risksText) advice.risks = pickLines(risksText);
+  const triggerText = section('什么情况下需要重新评估') || section('触发条件') || section('重新评估');
+  if (triggerText) advice.riskTriggers = pickLines(triggerText);
+  const confText = section('置信度自评') || section('4.2 置信度自评');
+  if (confText) {
+    const levelMatch = /(高|中|低)/.exec(confText);
+    const level = levelMatch ? levelMatch[1] : '中';
+    const reasonLine = confText
+      .split('\n')
+      .find((l) => /理由|因为|由于|数据|估算|不确定/.test(l) && l.trim().length > 6);
+    advice.confidence = {
+      level,
+      score: level === '高' ? 85 : level === '低' ? 55 : 70,
+      strengths: [],
+      uncertainties: [],
+      reason: (reasonLine ? reasonLine.trim() : confText).replace(/^[-•*\s]+/, '').slice(0, 160),
+    };
+  }
 
   // 兜底：从全文提取关键句
   if (advice.pros.length === 0 && advice.nextSteps.length === 0) {
@@ -98,6 +121,10 @@ export class AgentPipeline {
   // 跨阶段共享上下文（真实模式：校核反馈等中间结论累积传递，供回退闭环与 Chief 仲裁引用）
   private sharedContext: string[] = [];
 
+  // 人类在环（HITL）干预项与预算超限标记
+  private humanOverrides: IHumanOverrides | null = null;
+  private budgetExceededIds: string[] = [];
+
   private onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void;
   private onDegrade?: (reason: string) => void;
 
@@ -122,6 +149,52 @@ export class AgentPipeline {
   /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
   private emitProgress(agentIndex: number): void {
     this.onProgress?.([...this.actionLog], agentIndex);
+  }
+
+  /** 设定人类在环干预项（工程师在环：锁定方案/预算上限/强制权重/备注）。必须在 run() 前调用 */
+  setHumanOverride(overrides: IHumanOverrides): void {
+    this.humanOverrides = overrides;
+    if (overrides.forcedWeights) {
+      this.weights = { ...this.weights, ...overrides.forcedWeights };
+    }
+  }
+
+  /** 干预日志（写入 actionLog 与结论，用户/评委可见"人在环"决策） */
+  private pushHumanLog(content: string): void {
+    this.actionLog.push({
+      type: 'think',
+      agent: 'chief',
+      content,
+      step: this.actionLog.length + 1,
+      timestamp: Date.now(),
+    });
+    this.conclusions.push(`[总工·干预] ${content}`);
+  }
+
+  /** run 开始时把干预项写入日志（体现"工程师先行决策"） */
+  private applyHumanOverrideLogs(): void {
+    const h = this.humanOverrides;
+    if (!h) return;
+    if (h.budgetCap != null) {
+      this.pushHumanLog(`⚠️ 人工设定预算上限 ${h.budgetCap} 万元，超出方案将标记风险并如实反映`);
+    }
+    if (h.lockedSchemeIds && h.lockedSchemeIds.length > 0) {
+      const names = this.candidateSchemes
+        .filter((sc) => h.lockedSchemeIds!.includes(sc.id))
+        .map((sc) => sc.name)
+        .join('、');
+      this.pushHumanLog(`🔒 人工锁定方案（AI 不得替换）：${names || h.lockedSchemeIds.join('、')}`);
+    }
+    if (h.notes) {
+      this.pushHumanLog(`📝 人工备注：${h.notes}`);
+    }
+    if (h.forcedWeights) {
+      const labelMap: Record<string, string> = { cost: '成本', duration: '工期', safety: '安全', green: '绿色' };
+      const parts = Object.entries(h.forcedWeights)
+        .map(([k, v]) => `${labelMap[k] || k} ${v}%`)
+        .join('、');
+      this.pushHumanLog(`⚖️ 人工强制评分权重：${parts}`);
+    }
   }
 
   /** 运行完整管线 */
@@ -156,6 +229,8 @@ export class AgentPipeline {
 
   /** 核心执行：四阶段 + 真实模式校核回退闭环 */
   private async runCore(): Promise<IAgentPipelineResult> {
+    // 人类在环：先把工程师干预写入日志（决策先行），再进入四 Agent 流程
+    this.applyHumanOverrideLogs();
     // 按顺序执行四个子 Agent，每完成一个阶段即回调进度（真实模式逐步展示思考过程）
     await this.runArchitect();
     this.emitProgress(1);
@@ -199,6 +274,8 @@ export class AgentPipeline {
 
     await this.runEconomist();
     this.emitProgress(3);
+    // 预算上限判定（Economist 出价后、Chief 仲裁前；纯硬编码，零额外 API 成本）
+    this.computeBudgetExceeded();
     await this.runChief();
     this.emitProgress(4);
 
@@ -229,6 +306,29 @@ export class AgentPipeline {
     return out;
   }
 
+  /** 预算上限判定：估算总造价（cost 元/㎡ × 面积 ㎡ ÷ 10000 → 万元）超出人工预算上限（万元）的方案 */
+  private computeBudgetExceeded(): void {
+    this.budgetExceededIds = [];
+    const cap = this.humanOverrides?.budgetCap;
+    if (cap == null) return;
+    const area = this.params.area;
+    for (const id of this.candidateSchemes.map((sc) => sc.id)) {
+      const m = this.metrics[id] as { cost?: { costPerSqm?: number } } | undefined;
+      const cost = m?.cost?.costPerSqm as number | undefined;
+      if (typeof cost === 'number' && typeof area === 'number') {
+        const totalWan = (cost * area) / 10000;
+        if (totalWan > cap) this.budgetExceededIds.push(id);
+      }
+    }
+    if (this.budgetExceededIds.length > 0) {
+      const names = this.candidateSchemes
+        .filter((sc) => this.budgetExceededIds.includes(sc.id))
+        .map((sc) => sc.name)
+        .join('、');
+      this.pushHumanLog(`⚠️ 预算超限检测：${names} 估算总造价超出上限 ${cap} 万元（已如实标记）`);
+    }
+  }
+
   /** 重置中间状态（崩溃降级重跑前调用） */
   private resetState(): void {
     this.candidateSchemes = [];
@@ -249,6 +349,20 @@ export class AgentPipeline {
       // 真实模式：共享单例引擎；重出（feedback 非空）时在同一会话续写，保证推理连贯
       let prompt = buildAgentPrompt('architect', this.params) +
         '\n\n请调用 query_structure_systems 工具筛选出最适合本项目的 3 个候选结构方案，并给出简要的适用性评述。';
+      // 人类在环：锁定方案与备注注入（首轮与重出都生效）
+      if (this.humanOverrides?.lockedSchemeIds?.length) {
+        const lockedNames = STRUCTURE_SYSTEM_LIBRARY
+          .filter((sc) => this.humanOverrides!.lockedSchemeIds!.includes(sc.id))
+          .map((sc) => sc.name)
+          .join('、');
+        prompt +=
+          '\n\n## 🔒 工程师人工锁定（必须遵守）\n以下方案已被工程师锁定，必须保留为候选且不得替换：' +
+          (lockedNames || this.humanOverrides.lockedSchemeIds.join('、')) +
+          '。请确保选型结果中始终包含这些方案。';
+      }
+      if (this.humanOverrides?.notes) {
+        prompt += '\n\n## 📝 工程师备注\n' + this.humanOverrides.notes;
+      }
       if (feedback) {
         prompt +=
           '\n\n## ⚠️ 上一轮规范校核反馈（必须认真对待）\n' +
@@ -283,6 +397,19 @@ export class AgentPipeline {
       const conclusionEntry = logs.find((l) => l.type === 'conclusion');
       if (conclusionEntry) {
         this.conclusions.push(conclusionEntry.content);
+      }
+    }
+
+    // 人类在环：锁定方案强制保留（工程师锁超越 LLM 选型结果）
+    if (this.humanOverrides?.lockedSchemeIds?.length) {
+      const missing = this.humanOverrides.lockedSchemeIds.filter(
+        (id) => !this.candidateSchemes.some((sc) => sc.id === id)
+      );
+      for (const id of missing) {
+        const lib = STRUCTURE_SYSTEM_LIBRARY.find((sc) => sc.id === id);
+        if (lib && !this.candidateSchemes.some((sc) => sc.id === id)) {
+          this.candidateSchemes.push(lib);
+        }
       }
     }
   }
@@ -459,10 +586,31 @@ export class AgentPipeline {
             .map((v) => `${v.schemeName}（${v.schemeId}）：${v.summary}`)
             .join('；')}。请在比选评分中如实反映该风险，并在风险提示中注明"该方案需人工复核后方可深化"。`
         : '\n\n## ✅ 校核状态\n所有候选方案均已通过（或经迭代修正通过）抗震与防火规范校核。';
+      // 人类在环：预算约束 + 锁定标注 + 备注注入（Chief 仲裁必读）
+      const cap = this.humanOverrides?.budgetCap;
+      const budgetStatus = cap != null
+        ? (this.budgetExceededIds.length > 0
+            ? `\n\n## ⚙️ 人工预算约束（重要，仲裁必读）\n工程师设定预算上限 ${cap} 万元。以下方案估算总造价超出上限，请在评分与风险提示中如实反映，并优先推荐预算内方案：${this.candidateSchemes
+                .filter((sc) => this.budgetExceededIds.includes(sc.id))
+                .map((sc) => `${sc.name}（${sc.id}）`)
+                .join('、')}。`
+            : `\n\n## ⚙️ 人工预算约束\n工程师设定预算上限 ${cap} 万元，当前所有候选方案均在预算内。`)
+        : '';
+      const lockNote = this.humanOverrides?.lockedSchemeIds?.length
+        ? `\n\n## 🔒 人工锁定方案\n${this.humanOverrides.lockedSchemeIds
+            .map((id) => this.candidateSchemes.find((sc) => sc.id === id)?.name || id)
+            .join('、')}已被工程师锁定，比选时须优先考虑，不得因评分而建议替换。`
+        : '';
+      const humanNote = this.humanOverrides?.notes
+        ? `\n\n## 📝 工程师备注\n${this.humanOverrides.notes}`
+        : '';
       const prompt = buildAgentPrompt('chief', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         `\n权重配置：${JSON.stringify(this.weights)}\n` +
         checkStatus +
+        budgetStatus +
+        lockNote +
+        humanNote +
         '\n请调用 compare_schemes 工具进行综合对比评分，调用时必须传入 weights 参数（与上述权重配置一致），然后给出最终结论。' +
         '\n\n**输出结构必须包含以下章节（按顺序）：**' +
         '\n1. 综合推荐方案及排序（含综合得分）' +
@@ -508,9 +656,11 @@ export class AgentPipeline {
         ranking: (compareResult as any)?.ranking || [],
         codeChecks: this.codeChecks,
         metrics: this.metrics,
-        advice: extractAdviceFromMarkdown(result.finalAnswer || ''),
+        advice: this.withBudgetRisk(extractAdviceFromMarkdown(result.finalAnswer || '')),
         actionLog: [...this.actionLog],
         conclusions: [...this.conclusions],
+        humanOverrides: this.humanOverrides || undefined,
+        budgetExceeded: [...this.budgetExceededIds],
       };
     } else {
       const trace = new TraceEngine(this.params, this.weights);
@@ -528,11 +678,29 @@ export class AgentPipeline {
         ranking,
         codeChecks: this.codeChecks,
         metrics: this.metrics,
-        advice,
+        advice: this.withBudgetRisk(advice),
         actionLog: [...this.actionLog],
         conclusions: [...this.conclusions],
+        humanOverrides: this.humanOverrides || undefined,
+        budgetExceeded: [...this.budgetExceededIds],
       };
     }
+  }
+
+  /** 预算超限风险注入 advice（HITL 预算约束在建议中如实反映） */
+  private withBudgetRisk(advice: IAgentPipelineResult['advice']): IAgentPipelineResult['advice'] {
+    const cap = this.humanOverrides?.budgetCap;
+    if (cap != null && this.budgetExceededIds.length > 0) {
+      const names = this.candidateSchemes
+        .filter((sc) => this.budgetExceededIds.includes(sc.id))
+        .map((sc) => sc.name)
+        .join('、');
+      advice.risks = [
+        ...(advice.risks || []),
+        `⚠️ 预算超限：${names} 估算总造价超出工程师设定的 ${cap} 万元上限，需调整预算或方案后复核`,
+      ];
+    }
+    return advice;
   }
 
   /** 获取当前中间状态（可选用于流式展示） */
@@ -557,8 +725,10 @@ export async function runAgentPipeline(
   weights?: IWeightConfig,
   config?: Partial<IEngineConfig>,
   onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void,
-  onDegrade?: (reason: string) => void
+  onDegrade?: (reason: string) => void,
+  humanOverrides?: IHumanOverrides
 ): Promise<IAgentPipelineResult> {
   const pipeline = new AgentPipeline(params, weights, config, onProgress, onDegrade);
+  if (humanOverrides) pipeline.setHumanOverride(humanOverrides);
   return pipeline.run();
 }

@@ -1,7 +1,7 @@
 // Agent 引擎类型定义
 // EXPORTS: IAgentActionLog, IAgentState, IAgentPipelineResult, AgentType, IEngineConfig, IIntentResult, EIntentType
 
-import type { IStructureScheme } from '@/data/structure';
+import type { IStructureScheme, IWeightConfig } from '@/data/structure';
 
 /** 行动日志条目类型 */
 export type ActionLogType = 'think' | 'tool_call' | 'tool_result' | 'conclusion';
@@ -228,6 +228,22 @@ export interface IAgentPipelineResult {
   conclusions: string[];
   /** 降级标记：真实模式崩溃后自动切换演示轨迹继续跑完时写入（透明降级） */
   degraded?: { from: 'real' | 'trace'; reason: string };
+  /** 本次运行携带的人类在环干预项（HITL） */
+  humanOverrides?: IHumanOverrides;
+  /** 超出人工预算上限的方案 ID 列表（budgetCap 设定时计算） */
+  budgetExceeded?: string[];
+}
+
+/** 人类在环（HITL）干预项：工程师在管线运行前/中设定的硬约束与备注 */
+export interface IHumanOverrides {
+  /** 人工锁定的方案 ID：AI 不得替换，重出时强制保留为候选 */
+  lockedSchemeIds?: string[];
+  /** 人工预算上限（万元）：超出标记风险并如实反映到比选与建议 */
+  budgetCap?: number;
+  /** 人工强制评分权重（覆盖默认权重） */
+  forcedWeights?: Partial<IWeightConfig>;
+  /** 人工备注：注入到子 Agent 的 prompt 中 */
+  notes?: string;
 }
 
 /** 推理引擎配置 */

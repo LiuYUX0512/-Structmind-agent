@@ -49,6 +49,7 @@ import {
 } from '@/data/structure';
 import {
   runAgentPipeline,
+  type IHumanOverrides,
   processAgentMessage,
   parseIntentByRules,
   loadEngineConfig,
@@ -714,7 +715,7 @@ ${dis || '- （待补充）'}
   }, []);
 
   const doGenerate = useCallback(
-    async (params: IProjectParams, w: IWeightConfig, extraPrompt?: string) => {
+    async (params: IProjectParams, w: IWeightConfig, extraPrompt?: string, humanOverrides?: IHumanOverrides) => {
       // 取消上一次生成
       generateAbortRef.current?.abort();
       const controller = new AbortController();
@@ -777,7 +778,9 @@ ${dis || '- （待补充）'}
                 setActionLog(logs);
                 setCurrentAgentIndex(agentIndex);
               }
-            : undefined
+            : undefined,
+          undefined,
+          humanOverrides
         );
 
         if (controller.signal.aborted) return;
@@ -881,7 +884,10 @@ ${dis || '- （待补充）'}
             const fallbackResult: IAgentPipelineResult = await runAgentPipeline(
               params,
               w,
-              { mode: 'trace', maxSteps: 20 }
+              { mode: 'trace', maxSteps: 20 },
+              undefined,
+              undefined,
+              humanOverrides
             );
 
             if (controller.signal.aborted) return;
@@ -969,10 +975,10 @@ ${dis || '- （待补充）'}
   );
 
   const handleGenerate = useCallback(
-    (params: IProjectParams, w: IWeightConfig) => {
+    (params: IProjectParams, w: IWeightConfig, humanOverrides?: IHumanOverrides) => {
       setProjectParams(params);
       setWeights(w);
-      doGenerate(params, w);
+      doGenerate(params, w, undefined, humanOverrides);
     },
     [doGenerate]
   );
@@ -1341,6 +1347,7 @@ ${dis || '- （待补充）'}
         />
          <ParamsSection
            onGenerate={handleGenerate}
+           latestSchemes={schemes}
            isGenerating={isGeneratingSchemes}
            initialParams={projectParams}
            initialWeights={weights}

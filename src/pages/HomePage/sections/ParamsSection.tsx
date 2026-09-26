@@ -57,14 +57,18 @@ import {
   MOCK_WEIGHT_CONFIG,
   type IProjectParams,
   type IWeightConfig,
+  type IStructureScheme,
 } from '@/data/structure';
+import type { IHumanOverrides } from '@/agent/types';
 import ApiKeyModal from '@/components/ApiKeyModal';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { getLlmConfig } from '@/components/ApiKeyModal';
 
 interface ParamsSectionProps {
-   onGenerate: (params: IProjectParams, weights: IWeightConfig) => void;
+   onGenerate: (params: IProjectParams, weights: IWeightConfig, humanOverrides?: IHumanOverrides) => void;
+   /** 最近一次生成的候选方案（供"锁定方案"多选使用） */
+   latestSchemes?: IStructureScheme[];
    isGenerating: boolean;
    initialParams: IProjectParams | null;
    initialWeights: IWeightConfig;
@@ -194,6 +198,7 @@ type ParamsFormData = z.infer<typeof paramsSchema>;
 
 function ParamsSection({
    onGenerate,
+   latestSchemes,
    isGenerating,
    initialParams,
    initialWeights,
@@ -371,6 +376,52 @@ function ParamsSection({
       },
     },
   ];
+
+  // ===== 人类在环（HITL）干预面板状态 =====
+  const [hitlOpen, setHitlOpen] = useState(false);
+  const [budgetCapInput, setBudgetCapInput] = useState('');
+  const [notesInput, setNotesInput] = useState('');
+  const [lockedIds, setLockedIds] = useState<string[]>([]);
+
+  const toggleLock = (id: string) => {
+    setLockedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  /** 应用干预并重跑：以当前表单参数 + 干预项触发新一轮生成 */
+  const handleApplyIntervention = () => {
+    if (!weightsValid) {
+      toast.error('权重总和必须等于 100%，请调整后重试');
+      return;
+    }
+    const values = form.getValues();
+    const params: IProjectParams = {
+      buildingType: values.buildingType as IProjectParams['buildingType'],
+      floors: values.floors,
+      area: values.area,
+      structurePreference: values.structurePreference,
+      seismicIntensity: values.seismicIntensity as IProjectParams['seismicIntensity'],
+      soilCategory: values.soilCategory as IProjectParams['soilCategory'],
+      mainSpan: values.mainSpan,
+      budget: values.budget,
+      geologyType: values.geologyType,
+      windPressure: values.windPressure,
+      snowPressure: values.snowPressure,
+      fortificationCategory: values.fortificationCategory,
+      buildingHeight: values.buildingHeight,
+    };
+    const overrides: IHumanOverrides = {};
+    if (budgetCapInput.trim()) {
+      const cap = Number(budgetCapInput);
+      if (!Number.isFinite(cap) || cap <= 0) {
+        toast.error('预算上限需为正数（单位：万元）');
+        return;
+      }
+      overrides.budgetCap = cap;
+    }
+    if (lockedIds.length > 0) overrides.lockedSchemeIds = [...lockedIds];
+    if (notesInput.trim()) overrides.notes = notesInput.trim();
+    onGenerate(params, weights, Object.keys(overrides).length > 0 ? overrides : undefined);
+  };
 
   const handleSubmit = (values: ParamsFormData) => {
     if (!weightsValid) {
@@ -1312,6 +1363,100 @@ function ParamsSection({
                       <br />
                       3. 本工具输出结果仅供方案阶段比选参考，正式设计需经专业结构计算软件复核。
                     </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Expert intervention card - Human-in-the-Loop */}
+            <Card className="border-teal/30 bg-teal/[0.05] blueprint-card">
+              <CardContent className="pt-5">
+                <div className="flex items-start gap-3">
+                  <Shield className="mt-0.5 size-4 shrink-0 text-teal" strokeWidth={1.75} />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold">
+                        专家干预{' '}
+                        <span className="font-mono text-[10px] tracking-wider text-muted-foreground">
+                          HUMAN-IN-THE-LOOP
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setHitlOpen((v) => !v)}
+                        className="text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {hitlOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      工程师在环：锁定方案 / 预算上限 / 备注，Agent 必须遵守
+                    </p>
+                    {hitlOpen && (
+                      <div className="space-y-3 pt-1">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-muted-foreground">
+                            预算上限（万元）— 超出将标记风险并如实反映
+                          </label>
+                          <Input
+                            type="number"
+                            min={0}
+                            placeholder="如 8000"
+                            value={budgetCapInput}
+                            onChange={(e) => setBudgetCapInput(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-muted-foreground">
+                            锁定方案（AI 不得替换）
+                          </label>
+                          {latestSchemes && latestSchemes.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {latestSchemes.map((sc) => (
+                                <label
+                                  key={sc.id}
+                                  className="flex cursor-pointer items-center gap-2 text-xs text-foreground/90"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={lockedIds.includes(sc.id)}
+                                    onChange={() => toggleLock(sc.id)}
+                                    className="accent-teal"
+                                  />
+                                  <span>{sc.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-muted-foreground">
+                              先生成方案后，可在此锁定候选方案
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-muted-foreground">
+                            备注（注入 Agent 的思考过程）
+                          </label>
+                          <textarea
+                            rows={2}
+                            placeholder="如：优先考虑装配式施工"
+                            value={notesInput}
+                            onChange={(e) => setNotesInput(e.target.value)}
+                            className="w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-xs outline-none transition-colors focus:border-teal/50"
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="w-full"
+                          disabled={isGenerating || disabled}
+                          onClick={handleApplyIntervention}
+                        >
+                          <Zap className="size-3.5" />
+                          应用干预并重跑
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
