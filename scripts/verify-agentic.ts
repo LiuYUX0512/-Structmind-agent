@@ -11,9 +11,11 @@ import { TOOL_REGISTRY, executeToolByName } from '../src/agent/tools';
 import { resolveKnowledgeBasis } from '../src/data/code-knowledge';
 import { saveHistoryEntry, loadHistory, clearHistory, type IHistoryEntry } from '../src/data/project-history';
 import type { IProjectParams } from '../src/data/structure';
+import { STRUCTURE_SYSTEM_LIBRARY } from '../src/data/structure';
 import { parseIntentByRules } from '../src/agent/intent';
 import { EIntentType } from '../src/agent/types';
 import { estimateCarbonBreakdown } from '../src/data/carbon-model';
+import { buildModelDefinition, serializeModelJson, serializeModelText, buildImportGuide } from '../src/lib/model-export';
 import { extractDebateItems } from '../src/components/DebatePanel';
 
 // ---------- Mock LLM 工具 ----------
@@ -696,6 +698,49 @@ async function scenarioNewFeatures() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+
+// ---------- 场景 10：PKPM/YJK 模型导出（前哨占位） ----------
+async function scenarioModelExport() {
+  const checks: Array<[string, boolean, string]> = [];
+  const params: IProjectParams = {
+    buildingType: 'factory',
+    floors: 5,
+    area: 5000,
+    structurePreference: 'any',
+    seismicIntensity: '8',
+    soilCategory: 'II',
+    geologyType: '粉质黏土',
+    mainSpan: 12,
+    budget: 2800,
+    windPressure: '0.45',
+    snowPressure: '0.35',
+    fortificationCategory: '标准设防',
+  };
+  const scheme = STRUCTURE_SYSTEM_LIBRARY.find((x) => x.id === 'steel') || STRUCTURE_SYSTEM_LIBRARY[0];
+
+  const model = buildModelDefinition(params, scheme);
+  checks.push(['格式标识正确', model.format === 'structmind-sm-v1', model.format]);
+  checks.push(['轴线数量 = (开间+1)+(进深+1)', model.axes.length === (model.grid.baysX + 1) + (model.grid.baysZ + 1), `axes=${model.axes.length}, bays=${model.grid.baysX}x${model.grid.baysZ}`]);
+  checks.push(['层高表覆盖全部楼层', model.floorLevels.length === params.floors, `levels=${model.floorLevels.length}`]);
+  checks.push(['柱表 = 全部轴线交点', model.members.columns.length === (model.grid.baysX + 1) * (model.grid.baysZ + 1), `cols=${model.members.columns.length}`]);
+  checks.push(['梁表包含双向主梁（每向 = 轴线数×跨数）', model.members.beams.length === model.grid.baysX * (model.grid.baysZ + 1) + model.grid.baysZ * (model.grid.baysX + 1), `beams=${model.members.beams.length}`]);
+  checks.push(['截面为数值（非空区间）', /^\d+×\d+$/.test(model.members.columns[0].section), model.members.columns[0].section]);
+  checks.push(['免责声明存在且含 PKPM/YJK 字样', model.caveat.includes('PKPM/YJK'), model.caveat.slice(0, 30)]);
+  const text = serializeModelText(model);
+  checks.push(['文本含轴线/层高/柱/梁四个章节', ['轴线网格', '层高表', '柱截面表', '梁截面表'].every((k) => text.includes(k)), 'sections ok']);
+  const guide = buildImportGuide(model);
+  checks.push(['导入说明含"智能前端"定位', guide.includes('智能前端'), guide.slice(0, 40)]);
+  const json = serializeModelJson(model);
+  checks.push(['JSON 可解析且字段完整', JSON.parse(json).scheme.id === scheme.id, 'json ok']);
+
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -711,10 +756,11 @@ const r6 = await scenarioChiefStructured();
 const r7 = await scenarioKnowledge();
 const r8 = await scenarioHistory();
 const r9 = await scenarioNewFeatures();
+const r10 = await scenarioModelExport();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} · 场景9 ${r9.pass}/${r9.total} ----`);
-if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok && r9.ok) {
-  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本 + 辩论提取 + 意图归一 + 碳排构成');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} · 场景9 ${r9.pass}/${r9.total} · 场景10 ${r10.pass}/${r10.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok && r9.ok && r10.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本 + 辩论提取 + 意图归一 + 碳排构成 + PKPM/YJK模型导出');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

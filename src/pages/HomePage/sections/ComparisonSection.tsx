@@ -81,6 +81,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { exportSchemeComparisonCsv } from '@/lib/export-csv';
+import { downloadModelFiles } from '@/lib/model-export';
 
 interface ComparisonSectionProps {
   schemes: IStructureScheme[];
@@ -1193,6 +1194,29 @@ function ComparisonSection({
                              </div>
                            </div>
                          </div>
+                         {projectParams && (
+                           <div className="mt-3 flex flex-col gap-1.5 border-t border-border/40 pt-2.5">
+                             <Button
+                               variant="outline"
+                               size="sm"
+                               className="w-full gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+                               onClick={() => {
+                                 try {
+                                   const r = downloadModelFiles(projectParams, recommendedScheme);
+                                   toast.success('已导出建模文件 ' + r.jsonName);
+                                 } catch (err) {
+                                   toast.error('导出失败：' + String(err).slice(0, 40));
+                                 }
+                               }}
+                             >
+                               <Download className="h-3.5 w-3.5" />
+                               导出为结构建模文件
+                             </Button>
+                             <p className="font-mono text-[9px] leading-relaxed text-muted-foreground">
+                               PKPM / YJK 前哨 · 含轴线 / 层高 / 截面与导入指引，可直接用于专业软件初步建模
+                             </p>
+                           </div>
+                         )}
                        </motion.div>
                     )}
 
