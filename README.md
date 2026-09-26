@@ -1,132 +1,140 @@
-# 项目技术规范
+# 智构 StructMind · 建筑结构方案优化 AI 智能体
 
-## 技术栈
+> 第一届「海之子杯」AI 智能体挑战赛 · 智能设计与方案优化赛道 · 参赛作品
+> 面向建筑方案阶段的**多 Agent 协同**结构选型与优化工具，基于土木工程专业知识库智能生成多套候选方案并给出综合推荐。
 
-- 前端: React 19 + TypeScript
-- 样式: Tailwind CSS v4
-- UI 组件: shadcn/ui `import { Button } from "@/components/ui/button";`
-- 图标: lucide-react `import { SearchIcon } from "lucide-react";`
-- 图表: echarts-for-react `import ReactECharts from "echarts-for-react";`
-- 动画: framer-motion `import { motion } from "framer-motion";`
-- 路由: react-router-dom `import { Link, useNavigate } from "react-router-dom";`
+## 🚀 在线 Demo
 
----
+| 入口 | 地址 |
+|---|---|
+| **GitHub Pages（主站点，可公开访问）** | https://liuyux0512.github.io/-Structmind-agent/ |
+| 妙搭平台（原部署环境） | https://4m2urftxnpjq0.aiforce.cloud/app/app_17ebqts8axz |
 
-## 目录结构
+- 纯前端单页应用（SPA），手机/电脑浏览器均可直接打开，无需安装。
+- GitHub Pages 由 `gh-pages` 分支自动发布，push 即更新。
+
+## 🧠 项目定位
+
+传统结构设计软件（PKPM、YJK 等）是**详细设计阶段的校核工具**；本作品聚焦**方案阶段的多目标快速寻优**——在结构概念设计环节，让工程师在几分钟内获得：
+
+- 多套候选结构体系（框架 / 剪力墙 / 框架-剪力墙 / 钢结构…）的生成与横向比选；
+- 基于现行国家规范（GB 55002、GB 50011 等）的逐条自动校核；
+- 造价、工期、抗震、绿色低碳等多维度的量化对比；
+- 综合加权推荐与风险提示（含置信度评估、触发重算条件）。
+
+## 🏗️ 系统架构：多 Agent 协同管线
 
 ```
-src/
-├── index.tsx            # 入口（勿修改）
-├── app.tsx              # 路由配置（仅在 <Routes> 内增删 <Route>）
-├── index.css            # 全局样式 + 主题变量
-├── components/          # 基础 UI 组件（禁止存放业务组件）
-│   ├── layout.tsx       # 全局布局容器（含 <Outlet />）
-│   └── ui/              # shadcn/ui 内置组件（勿修改）
-├── pages/               # 页面模块（每个页面一个目录）
-│   ├── <PageName>/      # 页面目录示例
-│   │   ├── PageName.tsx        # 页面入口文件与目录同名
-│   │   └── components/         # 页面专属组件
-│   └── NotFoundPage/
-│       └── NotFoundPage.tsx
-├── hooks/               # 自定义 Hooks
-└── lib/                 # 工具函数（cn() 等）
-
-shared/
-└── static/              # 静态资源
-    ├── data/            # 数据文件（JSON）
-    └── images/          # 图片资源
+用户输入工程参数
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│           意图理解 Agent（intent.ts）          │
+│   解析参数完整性 / 语义归一 / 模式识别 / 参数补全   │
+└─────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│           方案创作工程师（pipeline.ts）         │
+│   依据工程参数生成候选结构体系与初始截面           │
+└─────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│           规范校核工程师（real-engine.ts）       │
+│   抗震 / 耐火 / 位移 / 承载 逐条判定（规则引擎）    │
+└─────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│           经济评估工程师（optimizer.ts）         │
+│   造价 / 工期 / 碳排放 / 施工难度 多目标量化       │
+└─────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────┐
+│           总工评审 Agent（反思 + 辩论 + 加权）    │
+│   四维权重综合评分 → 推荐方案 + 风险提示           │
+└─────────────────────────────────────────────┘
+      │
+      ▼
+       综合比选结果 · 规范校核报告 · 智能问答
 ```
 
----
+### 设计要点
 
-## 模板初始状态
+- **大模型只做"调度员/翻译官"**：意图解析、自然语言问答由 LLM 完成；**所有数值计算（内力估算、配筋率、挠度、碳排系数）由确定性规则引擎执行**，杜绝大模型幻觉导致的"拍脑袋算结构"。
+- **规范校核走硬逻辑**：抗震等级、位移角限值、耐火极限等判定基于结构化规则表（if-else 规则引擎），不依赖向量检索的模糊匹配。
+- **完整推理轨迹可溯源**：`trace-engine.ts` 记录每个 Agent 的思考、判定依据、引用的规范条款与计算过程，界面以时间线形式呈现，评审可见"为什么是这个结论"。
+- **反思 + 迭代回环**：总工评审会对推荐结果进行自我质疑（风险点、触发重算条件），体现真正的 Agent 决策回路而非一次性输出。
 
-- `app.tsx` 首页路由指向平台内置的 `<Welcome />` 组件
-- 开发时需将 `index` 路由替换为业务首页，并在 `pages/` 下创建对应页面目录
-- `layout.tsx` 为空壳容器（仅 `<Outlet />`），需根据需求实现导航和布局
+## ✨ 核心功能
 
----
+1. **方案智能生成**：输入层数、面积、跨度、设防烈度、预算等参数，自动生成 3 套候选结构方案；
+2. **规范自动校核**：抗震、耐火逐条判定（通过/警告/失败），附具体限值与实际值对照；
+3. **七维综合比选**：造价、工期、抗震性能、施工难度、可持续、碳排放、综合评分雷达图对比；
+4. **智能问答**：基于专业知识库的自然语言结构咨询；
+5. **实时计算模式 / 大屏模式**：适配不同演示场景；
+6. **运行时验证页**：内置评估集，一键跑通差异化场景验证管线正确性（`/verify` 路由）。
 
-## 禁止修改的文件
+## 🛠️ 技术栈
 
-| 文件 | 原因 |
-|------|------|
-| `src/index.tsx` | Provider 层级 + 样式引入，由模板管理 |
-| `src/components/ui/*` | shadcn/ui 内置组件，版本锁定 |
+- **前端**：React 19 + TypeScript + Vite 8（Rolldown）
+- **样式**：Tailwind CSS v4 + shadcn/ui
+- **可视化**：ECharts 6（雷达图/对比图）+ 自研 SVG 等轴测结构线框
+- **动画**：Framer Motion
+- **路由**：React Router v7
+- **Agent 引擎**：自研 TypeScript 多 Agent 管线（意图 → 创作 → 校核 → 评估 → 总工评审）
 
----
-
-## 文件放置规则
-
-| 内容类型 | 放置位置 |
-|---------|---------|
-| 新页面 | `src/pages/<PageName>/PageName.tsx` |
-| 页面专属组件 | `src/pages/<PageName>/components/` |
-| 自定义 Hooks | `src/hooks/` |
-| 工具函数 | `src/lib/` |
-| 静态数据文件 | `shared/static/data/` |
-| 静态图片 | `shared/static/images/` |
-
----
-
-## 导入路径
-
-```typescript
-// @/ 别名 → src/
-import { cn } from "@/lib/utils";
-import { useIsMobile } from "@/hooks/use-mobile";
-
-// @shared/ 别名 → shared/
-import heroImage from "@shared/static/images/hero.png";
-import configData from "@shared/static/config.json";
-```
-
----
-
-## 路由配置
-
-- 新增页面需在 `src/app.tsx` 的 `<Routes>` 内注册 `<Route>`
-- `BrowserRouter` 已在 `index.tsx` 中配置，`app.tsx` 中**禁止**再包裹 Router
-
----
-
-## 主题变量
-
-主题色定义在 `src/index.css`，通过 `:root` CSS 变量 + `@theme inline` 注册到 Tailwind。
-
-| 用途 | Tailwind 类 | CSS 变量 |
-|------|------------|----------|
-| 页面背景 | `bg-background` | `--background` |
-| 主文本 | `text-foreground` | `--foreground` |
-| 卡片背景 | `bg-card` | `--card` |
-| 次要文本 | `text-muted-foreground` | `--muted-foreground` |
-| 主色 | `bg-primary` / `text-primary` | `--primary` |
-| 强调色 | `bg-accent` | `--accent` |
-| 边框 | `border-border` | `--border` |
-| 危险色 | `text-destructive` | `--destructive` |
-| 图表色 | `bg-chart-1` ~ `bg-chart-5` | `--chart-1` ~ `--chart-5` |
-
-HSL 格式使用**空格分隔**：`--primary: hsl(150 60% 40%);`
-
----
-
-## 本地运行
+## 💻 本地运行
 
 ```bash
-# 1. 安装依赖（Node 20+）
+# 前置要求：Node.js 20+
 npm install
 
-# 2. 启动开发服务器
+# 启动开发服务器
 npm run dev:local
 # 浏览器打开 http://localhost:5173
 
-# 3. 生产构建（本地验证用）
+# 生产构建（本地验证）
 npm run build:local
+
+# GitHub Pages 部署构建（生成 dist/gh-pages/，push 到 gh-pages 分支即可发布）
+node scripts/build-gh-pages.mjs
 ```
 
-> 说明：
-> - `npm run dev` / `npm run build` 为妙搭平台专用命令（依赖 bash/rsync），仅用于平台部署；本地请使用 `dev:local` / `build:local`（跨平台，Windows/macOS/Linux 通用）。
+> **平台说明**
+> - `npm run dev` / `npm run build` 为妙搭平台专用命令（依赖 bash/rsync），本地请使用 `dev:local` / `build:local`（跨平台通用）。
 > - 首次在 Windows 上 `npm install` 后若构建报缺 `rolldown` / `lightningcss` / `tailwindcss oxide` 平台二进制，执行：
 >   `npm install @rolldown/binding-win32-x64-msvc lightningcss-win32-x64-msvc @tailwindcss/oxide-win32-x64-msvc`
-> - AI 插件能力（`capabilityClient`）依赖妙搭平台环境，本地运行时演示模式可正常工作，智能问答真实调用需配置平台插件。
+> - AI 插件能力（`capabilityClient`）依赖妙搭平台环境；本地运行时演示模式可正常工作。
 
+## 📁 目录结构
+
+```
+src/
+├── agent/                # ★ 多 Agent 管线核心（本作品创新点）
+│   ├── intent.ts         # 意图理解 Agent：参数解析/补全/模式识别
+│   ├── pipeline.ts       # 方案创作工程师：候选体系生成
+│   ├── real-engine.ts    # 规范校核工程师：规则引擎逐条判定
+│   ├── optimizer.ts      # 经济评估工程师：造价/工期/碳排放多目标
+│   ├── trace-engine.ts   # 推理轨迹引擎：全流程可溯源
+│   ├── tools.ts          # Agent 工具库
+│   ├── types.ts          # 领域类型定义
+│   └── index.ts          # Agent 管线入口
+├── pages/                # 页面
+│   ├── HomePage/         # 主工作台（参数录入/方案生成/对比分析/智能问答）
+│   ├── RuntimeVerify/    # Agent 管线运行时验证报告（/verify）
+│   └── NotFoundPage/
+├── components/           # UI 组件（含结构线框、Agent 时间线等）
+├── hooks/                # 自定义 Hooks
+└── lib/                  # 工具函数
+```
+
+## ⚠️ 免责声明
+
+本工具的计算基于经验公式与简化假定，仅用于**方案前期概念比选与决策参考，不构成设计依据**。实际工程设计必须由注册结构工程师主持，采用专业结构分析软件（PKPM/YJK 等）按现行国家标准逐项复核。系统内置 Human-in-the-loop 理念：最终决策权始终在持证工程师手中，AI 仅提供量化建议。
+
+## 📄 许可证
+
+本仓库为参赛作品，保留所有权利。
