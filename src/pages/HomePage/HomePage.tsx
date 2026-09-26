@@ -290,39 +290,16 @@ export default function HomePage() {
           if (pipeData.version !== STORAGE_VERSION) {
             logger.info(`Pipeline storage version mismatch (${pipeData.version} vs ${STORAGE_VERSION}), skipping restore`);
           } else if (pipeData.result && pipeData.result.schemes && pipeData.result.ranking) {
+            // 修复：打开页面时不再自动填充旧方案/推荐 —— 避免"一进来就按旧数据演好了"的假象
+            // 只恢复 agentContext 供智能问答引用上次会话结果；方案区保持空白，由用户主动点击生成
             const r: IAgentPipelineResult = pipeData.result;
-            const sortedSchemes = sortSchemesByRanking(r.schemes, r.ranking);
-            setSchemes(sortedSchemes);
-            setSelectedSchemeId(r.recommended?.schemeId || null);
-            setRecommendation({
-              schemeId: r.recommended.schemeId,
-              schemeName: r.recommended.schemeName,
-              reason: r.recommended.reason || '基于加权评分的综合推荐。',
-              overallScore: r.recommended.overallScore,
-              weightedScores: r.ranking.map((x) => ({
-                schemeId: x.schemeId,
-                schemeName: x.schemeName,
-                score: x.score,
-                breakdown: x.breakdown,
-              })),
-            });
-            // 恢复数据但不启动播放：actionLog 先清空，避免播放器自动启动
-            // 用户点击「重放」或重新生成时才开始播放
-            setActionLog([]);
-            setCurrentAgentIndex(4);
             setAgentContext({
               currentParams: pipeData.params || projectParams || MOCK_PROJECT_PARAMS,
               weights: pipeData.weights || MOCK_WEIGHT_CONFIG,
               lastResult: r,
             });
-            const schemeMd = r.schemes
-              .map(
-                (s, i) =>
-                  `## 方案${i + 1}：${s.name}\n\n${s.description}\n\n**造价**：${s.metrics.cost} 元/㎡\n**工期**：${s.metrics.duration} 个月\n**抗震性能**：${s.metrics.seismicPerformance}/10\n**施工难度**：${s.metrics.constructionDifficulty}/10\n**可持续性**：${s.metrics.sustainability}/10`
-              )
-              .join('\n\n');
-            setSchemeContent(schemeMd);
-            setRecommendationContent(r.recommended.reason || '');
+            // 提示用户上次会话有结果，可重新生成
+            setShowDemoBanner(true);
           }
         } catch (pipeErr) {
           logger.warn('Failed to parse saved pipeline, cleaning up:', String(pipeErr));
@@ -1389,7 +1366,11 @@ ${dis || '- （待补充）'}
        </AnimatePresence>
 
       <main className="relative z-10 space-y-16 md:space-y-20 pb-4">
-        <HeroSection onStart={scrollToParams} />
+        <HeroSection
+          onStart={scrollToParams}
+          params={projectParams}
+          scheme={schemes.find((s) => s.id === selectedSchemeId) || recommendation ? schemes[0] : null}
+        />
          <ParamsSection
            onGenerate={handleGenerate}
            isGenerating={isGeneratingSchemes}

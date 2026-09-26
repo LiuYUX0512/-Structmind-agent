@@ -222,6 +222,8 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [rotateAngle, setRotateAngle] = useState(-30);
+  const [zoom, setZoom] = useState(1);
+  const [isDraggingState, setIsDraggingState] = useState(false);
   const animRef = useRef<number | null>(null);
   const lastInteraction = useRef<number>(Date.now());
 
@@ -232,10 +234,11 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
 
   // 等轴测投影：3D 坐标 → 2D 屏幕坐标
   const project = useMemo(() => {
-    const scale = Math.min(
+    const baseScale = Math.min(
       240 / Math.max(geom.totalWidth, geom.totalDepth),
       200 / geom.totalHeight
     );
+    const scale = baseScale * zoom;
     const angleY = (rotateAngle * Math.PI) / 180;
     const tilt = 0.42;
 
@@ -253,16 +256,22 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
 
       return [sx, sy];
     };
-  }, [geom, rotateAngle]);
+  }, [geom, rotateAngle, zoom]);
 
-  // 自动旋转动画（更慢、更优雅）
+  // 自动旋转动画（更慢、更优雅）—— 角度节流：累积到 0.8° 才更新一次，避免每帧全量重算 SVG
   useEffect(() => {
     let last = performance.now();
+    let pendingAngle = 0;
     const tick = (now: number) => {
       const dt = (now - last) / 1000;
       last = now;
       if (Date.now() - lastInteraction.current > 4000) {
-        setRotateAngle((a) => a + dt * 5);
+        pendingAngle += dt * 5;
+        if (Math.abs(pendingAngle) >= 0.8) {
+          const delta = pendingAngle;
+          pendingAngle = 0;
+          setRotateAngle((a) => a + delta);
+        }
       }
       animRef.current = requestAnimationFrame(tick);
     };
@@ -285,6 +294,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       // 只响应鼠标左键 / 触摸 / 触控笔
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       isDragging.current = true;
+      setIsDraggingState(true);
       lastX.current = e.clientX;
       lastInteraction.current = Date.now();
       pointerIdRef.current = e.pointerId;
@@ -305,6 +315,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
     const onUp = (e: PointerEvent) => {
       if (!isDragging.current) return;
       isDragging.current = false;
+      setIsDraggingState(false);
       lastInteraction.current = Date.now();
       if (pointerIdRef.current != null) {
         try { el.releasePointerCapture(pointerIdRef.current); } catch { /* ignore */ }
@@ -314,6 +325,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
 
     const onCancel = (e: PointerEvent) => {
       isDragging.current = false;
+      setIsDraggingState(false);
       lastInteraction.current = Date.now();
       if (pointerIdRef.current != null) {
         try { el.releasePointerCapture(pointerIdRef.current); } catch { /* ignore */ }
@@ -332,6 +344,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
     const onWindowUp = (e: PointerEvent) => {
       if (!isDragging.current) return;
       isDragging.current = false;
+      setIsDraggingState(false);
       lastInteraction.current = Date.now();
       if (pointerIdRef.current != null) {
         try { el.releasePointerCapture(pointerIdRef.current); } catch { /* ignore */ }
@@ -339,11 +352,19 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       pointerIdRef.current = null;
     };
 
+    // ===== 滚轮缩放 =====
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      lastInteraction.current = Date.now();
+      setZoom((z) => Math.min(2.4, Math.max(0.55, z * (e.deltaY < 0 ? 1.1 : 0.9))));
+    };
+
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
     el.addEventListener('pointercancel', onCancel);
     el.addEventListener('pointerleave', onUp);
+    el.addEventListener('wheel', onWheel, { passive: false });
 
     // window 兜底
     window.addEventListener('pointermove', onWindowMove, true);
@@ -356,6 +377,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onCancel);
       el.removeEventListener('pointerleave', onUp);
+      el.removeEventListener('wheel', onWheel);
       window.removeEventListener('pointermove', onWindowMove, true);
       window.removeEventListener('pointerup', onWindowUp, true);
       window.removeEventListener('pointercancel', onCancel, true);
@@ -906,13 +928,13 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
   return (
     <div
       ref={containerRef}
-      className="relative flex h-full w-full cursor-grab items-center justify-center bg-[#f4f7fb] select-none"
+      className="relative flex h-full w-full items-center justify-center bg-[#f4f7fb] select-none"
       style={{
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',
         msUserSelect: 'none',
-        cursor: isDragging.current ? 'grabbing' : 'grab',
+        cursor: isDraggingState ? 'grabbing' : 'grab',
       }}
       data-draggable="true"
     >
@@ -955,8 +977,8 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       </div>
       {/* 信息角标 - 右下：参数提示 */}
       <div className="pointer-events-none absolute bottom-2 right-3 font-mono text-[9px] text-muted-foreground/70 tracking-wider text-right">
-        <div>拖拽旋转</div>
-        <div>{params.floors}F · {geom.totalHeight.toFixed(0)}m</div>
+        <div>拖拽旋转 · 滚轮缩放</div>
+        <div>{params.floors}F · {geom.totalHeight.toFixed(0)}m{zoom !== 1 ? ` · ${(zoom * 100).toFixed(0)}%` : ''}</div>
       </div>
     </div>
   );

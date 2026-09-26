@@ -1,22 +1,34 @@
 import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award } from 'lucide-react';
+import StructureWireframe3D from '@/components/StructureWireframe3D';
+import { MOCK_PROJECT_PARAMS, type IProjectParams, type IStructureScheme } from '@/data/structure';
 
 interface HeroSectionProps {
   onStart: () => void;
+  /** 当前工程参数（未输入时用默认示例） */
+  params?: IProjectParams | null;
+  /** 当前选中的结构方案（用于 3D 预览随方案变化） */
+  scheme?: IStructureScheme | null;
 }
 
-function HeroSection({ onStart }: HeroSectionProps) {
+function HeroSection({ onStart, params, scheme }: HeroSectionProps) {
   const features = [
     { icon: PenTool, label: '方案创作', desc: '多体系智能生成', accent: 'primary' },
     { icon: Scale, label: '规范校核', desc: 'GB 55002 · 50011', accent: 'teal' },
     { icon: RefreshCw, label: '优化迭代', desc: '七维比选寻优', accent: 'amber' },
   ];
 
-  // 生成建筑楼层线 - 用于背景装饰
-  const floorLines = useMemo(() => {
-    return Array.from({ length: 12 }, (_, i) => 100 + i * 28);
-  }, []);
+  // 展示用参数：用户已输入则用真实值，否则用默认示例（让首屏 3D 是"活的"）
+  const displayParams = params || MOCK_PROJECT_PARAMS;
+  const structureLabel = scheme?.name
+    ? (scheme.name.includes('框架-剪力') ? 'FRAME-SHEARWALL' :
+       scheme.name.includes('剪力墙') ? 'SHEARWALL' :
+       scheme.name.includes('框架') ? 'FRAME' :
+       scheme.name.includes('钢') ? 'STEEL' :
+       scheme.name.includes('装配') ? 'PRECAST' :
+       'STRUCTURE')
+    : 'FRAME-SHEARWALL';
 
   return (
     <section
@@ -252,301 +264,80 @@ function HeroSection({ onStart }: HeroSectionProps) {
                 <span className="corner-bl" />
                 <span className="corner-br" />
 
-                {/* SVG 等轴测建筑线框 - 带淡入动画 */}
+                {/* 动态等轴测建筑线框 - 可拖拽旋转/滚轮缩放，随参数与方案实时变化 */}
                 <div
                   className="relative aspect-square w-full overflow-hidden"
                   style={{ borderRadius: '4px' }}
                 >
-                  {/* 网格底 */}
-                  <div className="absolute inset-0 bg-blueprint-grid opacity-40" />
+                  <StructureWireframe3D params={displayParams} scheme={scheme} />
+                </div>
 
-                  <svg
-                    viewBox="0 0 400 400"
-                    className="h-full w-full"
-                    preserveAspectRatio="xMidYMid meet"
-                  >
-                    <defs>
-                      {/* 青色发光效果 */}
-                      <filter id="glow-teal" x="-50%" y="-50%" width="200%" height="200%">
-                        <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-                        <feMerge>
-                          <feMergeNode in="coloredBlur" />
-                          <feMergeNode in="SourceGraphic" />
-                        </feMerge>
-                      </filter>
-                      {/* 琥珀色发光 */}
-                      <filter id="glow-amber" x="-50%" y="-50%" width="200%" height="200%">
-                        <feGaussianBlur stdDeviation="3" result="coloredBlur" />
-                        <feMerge>
-                          <feMergeNode in="coloredBlur" />
-                          <feMergeNode in="SourceGraphic" />
-                        </feMerge>
-                      </filter>
-                      {/* 渐隐渐变 */}
-                      <linearGradient id="fadeTop" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="currentColor" stopOpacity="0" />
-                        <stop offset="100%" stopColor="currentColor" stopOpacity="1" />
-                      </linearGradient>
-                    </defs>
+                {/* 图纸标签 */}
+                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal" />
+                    STRUCTURE · ISOMETRIC
+                  </span>
+                  <span className="text-teal/80">SCALE 1:100</span>
+                </div>
+              </motion.div>
 
-                    {/* 地面网格 */}
-                    <g opacity="0.35">
-                      {Array.from({ length: 13 }, (_, i) => {
-                        const x = 50 + i * 25;
-                        return (
-                          <line
-                            key={`gx-${i}`}
-                            x1={x}
-                            y1="340"
-                            x2={x + 100}
-                            y2="280"
-                            stroke="#1e4d7b"
-                            strokeWidth="0.5"
-                          />
-                        );
-                      })}
-                      {Array.from({ length: 9 }, (_, i) => {
-                        const y = 280 + i * 8;
-                        const xoff = i * 12.5;
-                        return (
-                          <line
-                            key={`gy-${i}`}
-                            x1={50 - xoff}
-                            y1={y}
-                            x2={350 - xoff}
-                            y2={y}
-                            stroke="#1e4d7b"
-                            strokeWidth="0.5"
-                          />
-                        );
-                      })}
-                    </g>
+              {/* 底部信息栏 */}
+              <div className="mt-2 flex items-center justify-between border-t border-border/50 px-1 py-2">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber" />
+                  <span className="font-mono text-[10px] font-semibold text-foreground">
+                    STRUCTMIND AI
+                  </span>
+                </div>
+                <div className="font-mono text-[10px] text-muted-foreground">
+                  {structureLabel} · {displayParams.floors}F
+                </div>
+              </div>
 
-                    {/* 建筑主体：楼板（半透明填充） */}
-                    <g style={{ color: '#1e4d7b' }}>
-                      {floorLines.map((topY, floorIdx) => {
-                        const floorNum = floorLines.length - floorIdx;
-                        const y = topY;
-                        const isBottomReinforce = floorIdx >= floorLines.length - 2;
-                        const fillOpacity = isBottomReinforce ? 0.18 : 0.08;
-                        const strokeColor = isBottomReinforce ? '#E8930C' : '#12A5B5';
-                        const strokeWidth = isBottomReinforce ? 1.5 : 0.8;
-
-                        return (
-                          <g key={`floor-${floorIdx}`}>
-                            {/* 楼板填充 */}
-                            <polygon
-                              points={`130,${y} 270,${y - 45} 320,${y - 15} 180,${y + 30}`}
-                              fill={isBottomReinforce ? 'rgba(232, 147, 12, 0.12)' : 'rgba(15, 76, 129, 0.06)'}
-                              stroke={strokeColor}
-                              strokeWidth={strokeWidth}
-                              opacity="0.9"
-                              filter={isBottomReinforce ? 'url(#glow-amber)' : undefined}
-                            />
-                            {/* 楼板厚度侧线 */}
-                            <line
-                              x1="270"
-                              y1={y - 45}
-                              x2="270"
-                              y2={y - 40}
-                              stroke={strokeColor}
-                              strokeWidth={strokeWidth}
-                              opacity="0.6"
-                            />
-                            <line
-                              x1="320"
-                              y1={y - 15}
-                              x2="320"
-                              y2={y - 10}
-                              stroke={strokeColor}
-                              strokeWidth={strokeWidth}
-                              opacity="0.6"
-                            />
-                          </g>
-                        );
-                      })}
-                    </g>
-
-                    {/* 柱子（矩形截面感）- 青色发光 */}
-                    <g filter="url(#glow-teal)">
-                      {/* 前左柱 */}
-                      <line x1="130" y1="100" x2="130" y2="370" stroke="#12A5B5" strokeWidth="2.5" opacity="0.9" />
-                      {/* 前右柱 */}
-                      <line x1="270" y1="55" x2="270" y2="325" stroke="#12A5B5" strokeWidth="2.5" opacity="0.9" />
-                      {/* 后左柱 */}
-                      <line x1="180" y1="130" x2="180" y2="400" stroke="#12A5B5" strokeWidth="1.5" opacity="0.5" />
-                      {/* 后右柱 */}
-                      <line x1="320" y1="85" x2="320" y2="355" stroke="#12A5B5" strokeWidth="1.5" opacity="0.5" />
-                    </g>
-
-                    {/* 梁线 - 每层 */}
-                    <g opacity="0.75">
-                      {floorLines.map((y, floorIdx) => {
-                        const isBottom = floorIdx >= floorLines.length - 2;
-                        return (
-                          <g key={`beam-${floorIdx}`}>
-                            {/* 前梁 */}
-                            <line
-                              x1="130"
-                              y1={y}
-                              x2="270"
-                              y2={y - 45}
-                              stroke={isBottom ? '#E8930C' : '#12A5B5'}
-                              strokeWidth={isBottom ? 1.5 : 1}
-                              filter={isBottom ? 'url(#glow-amber)' : undefined}
-                            />
-                            {/* 右梁 */}
-                            <line
-                              x1="270"
-                              y1={y - 45}
-                              x2="320"
-                              y2={y - 15}
-                              stroke={isBottom ? '#E8930C' : '#12A5B5'}
-                              strokeWidth={isBottom ? 1.5 : 1}
-                              filter={isBottom ? 'url(#glow-amber)' : undefined}
-                            />
-                            {/* 后梁（淡） */}
-                            <line x1="180" y1={y + 30} x2="320" y2={y - 15} stroke="#12A5B5" strokeWidth="0.7" opacity="0.5" />
-                            {/* 左梁（淡） */}
-                            <line x1="130" y1={y} x2="180" y2={y + 30} stroke="#12A5B5" strokeWidth="0.7" opacity="0.5" />
-                          </g>
-                        );
-                      })}
-                    </g>
-
-                    {/* 楼层编号标注 */}
-                    <g className="font-mono" fontSize="9" fill="#64748b">
-                      {floorLines.slice(0, 6).map((y, i) => (
-                        <text
-                          key={`fl-${i}`}
-                          x="95"
-                          y={y + 3}
-                          textAnchor="end"
-                          fill="#94a3b8"
-                          style={{ fontSize: '9px', fontFamily: 'monospace' }}
-                        >
-                          {floorLines.length - i}F
-                        </text>
-                      ))}
-                    </g>
-
-                    {/* 底部加强区标注 */}
-                    <g>
-                      <line
-                        x1="110"
-                        y1="385"
-                        x2="130"
-                        y2="372"
-                        stroke="#E8930C"
-                        strokeWidth="1"
-                        strokeDasharray="3 2"
-                        filter="url(#glow-amber)"
-                      />
-                      <text
-                        x="70"
-                        y="395"
-                        fill="#E8930C"
-                        style={{ fontSize: '9px', fontFamily: 'monospace', fontWeight: 'bold' }}
-                        filter="url(#glow-amber)"
-                      >
-                        底部加强区
-                      </text>
-                    </g>
-
-                    {/* 屋顶装饰线 */}
-                    <g opacity="0.6">
-                      <polygon
-                        points="155,75 245,42 270,57 180,90"
-                        fill="none"
-                        stroke="#12A5B5"
-                        strokeWidth="0.8"
-                        strokeDasharray="4 3"
-                      />
-                    </g>
-
-                    {/* 建筑高度标注线 */}
-                    <g opacity="0.5">
-                      <line x1="345" y1="60" x2="345" y2="350" stroke="#64748b" strokeWidth="0.8" strokeDasharray="2 2" />
-                      <polygon points="342,60 348,60 345,55" fill="#64748b" />
-                      <polygon points="342,350 348,350 345,355" fill="#64748b" />
-                      <text
-                        x="355"
-                        y="210"
-                        fill="#64748b"
-                        style={{ fontSize: '9px', fontFamily: 'monospace', writingMode: 'vertical-rl' }}
-                      >
-                        H ≈ 90m
-                      </text>
-                    </g>
+            {/* 浮动小卡 - 抗震等级 */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1, duration: 0.5 }}
+              className="absolute -top-2 -right-2 border border-teal/30 bg-card/90 p-2.5 shadow-lg backdrop-blur-md"
+              style={{ borderRadius: '4px' }}
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center bg-teal/15 text-teal" style={{ borderRadius: '2px' }}>
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
                   </svg>
-
-                  {/* 图纸标签 */}
-                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal" />
-                      STRUCTURE · ISOMETRIC
-                    </span>
-                    <span className="text-teal/80">SCALE 1:100</span>
-                  </div>
                 </div>
-
-                {/* 底部信息栏 */}
-                <div className="mt-2 flex items-center justify-between border-t border-border/50 px-1 py-2">
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="h-3.5 w-3.5 text-amber" />
-                    <span className="font-mono text-[10px] font-semibold text-foreground">
-                      STRUCTMIND AI
-                    </span>
-                  </div>
-                  <div className="font-mono text-[10px] text-muted-foreground">
-                    FRAME-SHEARWALL · 30F
-                  </div>
+                <div>
+                  <div className="font-mono text-[9px] tracking-wider text-muted-foreground">SEISMIC</div>
+                  <div className="data-number text-sm font-bold text-foreground">{displayParams.seismicIntensity}° 设防</div>
                 </div>
-              </motion.div>
+              </div>
+            </motion.div>
 
-              {/* 浮动小卡 - 抗震等级 */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1, duration: 0.5 }}
-                className="absolute -top-2 -right-2 border border-teal/30 bg-card/90 p-2.5 shadow-lg backdrop-blur-md"
-                style={{ borderRadius: '4px' }}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center bg-teal/15 text-teal" style={{ borderRadius: '2px' }}>
-                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                      <path d="M2 17l10 5 10-5" />
-                      <path d="M2 12l10 5 10-5" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="font-mono text-[9px] tracking-wider text-muted-foreground">SEISMIC</div>
-                    <div className="data-number text-sm font-bold text-foreground">8° 设防</div>
-                  </div>
+            {/* 浮动小卡 - 方案数量 */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1.2, duration: 0.5 }}
+              className="absolute -bottom-2 -left-2 border border-amber/40 bg-card/90 p-2.5 shadow-lg backdrop-blur-md"
+              style={{ borderRadius: '4px' }}
+            >
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center bg-amber/15 text-amber" style={{ borderRadius: '2px' }}>
+                  <Award className="h-3.5 w-3.5" strokeWidth={1.75} />
                 </div>
-              </motion.div>
-
-              {/* 浮动小卡 - 方案数量 */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.2, duration: 0.5 }}
-                className="absolute -bottom-2 -left-2 border border-amber/40 bg-card/90 p-2.5 shadow-lg backdrop-blur-md"
-                style={{ borderRadius: '4px' }}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center bg-amber/15 text-amber" style={{ borderRadius: '2px' }}>
-                    <Award className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  </div>
-                  <div>
-                    <div className="font-mono text-[9px] tracking-wider text-muted-foreground">3 SCHEMES</div>
-                    <div className="data-number text-sm font-bold text-foreground">智能比选</div>
-                  </div>
+                <div>
+                  <div className="font-mono text-[9px] tracking-wider text-muted-foreground">3 SCHEMES</div>
+                  <div className="data-number text-sm font-bold text-foreground">智能比选</div>
                 </div>
-              </motion.div>
-            </div>
-          </motion.div>
+              </div>
+            </motion.div>
+          </div>
+        </motion.div>
         </div>
       </div>
     </section>
