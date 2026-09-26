@@ -2,6 +2,7 @@ import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award } from 'lucide-react';
 import StructureWireframe3D from '@/components/StructureWireframe3D';
+import CountUpOnView from '@/components/CountUpOnView';
 import { MOCK_PROJECT_PARAMS, type IProjectParams, type IStructureScheme } from '@/data/structure';
 
 interface HeroSectionProps {
@@ -39,6 +40,8 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
     >
       {/* 蓝图网格底纹 - 更细腻更淡 */}
       <div className="pointer-events-none absolute inset-0 bg-blueprint-grid-lg opacity-[0.15]" />
+      {/* 呼吸网格：径向渐变呼吸动效（6s 循环，主色透明度 0.05，系统待命的科技生命感） */}
+      <div className="hero-breathing pointer-events-none absolute inset-0" />
 
       {/* 大型径向光效 */}
       <div className="pointer-events-none absolute -top-32 left-1/4 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-primary/6 blur-[120px]" />
@@ -165,7 +168,7 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: 0.6 + i * 0.1 }}
                     whileHover={{ y: -3, transition: { duration: 0.2 } }}
-                    className={`corner-marks relative flex flex-col items-start gap-2 border bg-card/70 p-4 backdrop-blur-sm blueprint-card`}
+                    className={`corner-marks relative flex flex-col items-start gap-2 border glass-blueprint p-4 blueprint-card`}
                     style={{ borderRadius: '6px' }}
                   >
                     <div className={`flex size-10 items-center justify-center ${colorClass} border`} style={{ borderRadius: '4px' }}>
@@ -221,12 +224,39 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
               </div>
             </motion.div>
 
+            {/* 数据统计带 - CountUp 滚动跳表（滚动到视口后 0→N 跳动） */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 1.0, duration: 0.6 }}
+              className="mt-9 grid max-w-xl grid-cols-4 gap-3 border-t border-border/50 pt-5"
+            >
+              {[
+                { v: 4, label: '多智能体协同', suffix: '', accent: 'text-teal' },
+                { v: 7, label: '维度比选', suffix: '', accent: 'text-primary' },
+                { v: 16, label: '结构体系库', suffix: '+', accent: 'text-amber' },
+                { v: 3, label: '方案并行比选', suffix: '', accent: 'text-emerald' },
+              ].map((s2) => (
+                <div key={s2.label} className="flex flex-col items-start gap-0.5">
+                  <CountUpOnView
+                    value={s2.v}
+                    suffix={s2.suffix}
+                    duration={1100}
+                    className={`data-number text-2xl font-black tracking-tight ${s2.accent}`}
+                  />
+                  <span className="font-mono text-[9px] tracking-wider text-muted-foreground">
+                    {s2.label.toUpperCase()}
+                  </span>
+                </div>
+              ))}
+            </motion.div>
+
             {/* 底部参赛信息 */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 1.1, duration: 0.6 }}
-              className="mt-10 flex items-center gap-3"
+              className="mt-6 flex items-center gap-3"
             >
               <div className="flex size-8 items-center justify-center border border-amber/40 bg-amber/10" style={{ borderRadius: '3px' }}>
                 <Award className="size-4 text-amber" strokeWidth={1.75} />
@@ -258,7 +288,7 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                className="corner-marks-full relative overflow-hidden border border-primary/20 bg-card/60 p-2 shadow-xl shadow-primary/5 backdrop-blur-sm"
+                className="corner-marks-full relative overflow-hidden border glass-blueprint p-2 shadow-xl shadow-primary/10"
                 style={{ borderRadius: '8px' }}
               >
                 <span className="corner-tl" />
@@ -271,7 +301,7 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                   className="relative aspect-square w-full overflow-hidden"
                   style={{ borderRadius: '4px' }}
                 >
-                  <StructureWireframe3D params={displayParams} scheme={scheme} codeChecks={codeChecks} />
+                  <StructureWireframe3D params={displayParams} scheme={scheme} codeChecks={codeChecks} autoRotate />
                 </div>
 
                 {/* 图纸标签 */}

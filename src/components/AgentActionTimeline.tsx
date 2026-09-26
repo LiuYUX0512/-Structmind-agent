@@ -144,17 +144,17 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
     };
 
     const agentColorMap: Record<string, string> = {
-      architect: 'bg-primary/20 text-primary border-primary/30',
-      code: 'bg-teal/20 text-teal border-teal/30',
-      economist: 'bg-amber/20 text-amber border-amber/30',
-      chief: 'bg-amber/15 text-amber border-amber/30',
+      architect: 'bg-teal/20 text-teal border-teal/30',
+      code: 'bg-amber/20 text-amber border-amber/30',
+      economist: 'bg-emerald/20 text-emerald border-emerald/30',
+      chief: 'bg-gold/15 text-gold border-gold/30',
     };
 
     const agentBadgeColorMap: Record<string, string> = {
-      architect: 'border-primary/40 bg-primary/10 text-primary',
-      code: 'border-teal/40 bg-teal/10 text-teal',
-      economist: 'border-amber/40 bg-amber/10 text-amber',
-      chief: 'border-amber/40 bg-amber/10 text-amber',
+      architect: 'border-teal/40 bg-teal/10 text-teal shadow-[0_0_12px_-2px_rgba(34,211,238,0.4)]',
+      code: 'border-amber/40 bg-amber/10 text-amber shadow-[0_0_12px_-2px_rgba(245,158,11,0.4)]',
+      economist: 'border-emerald/40 bg-emerald/10 text-emerald shadow-[0_0_12px_-2px_rgba(52,211,153,0.4)]',
+      chief: 'border-gold/40 bg-gold/10 text-gold shadow-[0_0_12px_-2px_rgba(234,179,8,0.45)]',
     };
 
     const visibleLogs = useMemo(() => {

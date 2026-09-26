@@ -71,6 +71,10 @@
   --amber-foreground: hsl(0 0% 100%);
   --teal: hsl(186 82% 39%);
   --teal-foreground: hsl(0 0% 100%);
+  --emerald: hsl(152 68% 40%);
+  --emerald-foreground: hsl(0 0% 100%);
+  --gold: hsl(42 82% 50%);
+  --gold-foreground: hsl(0 0% 100%);
   --shadow-x: 0px;
   --shadow-y: 2px;
   --shadow-blur: 12px;
@@ -129,6 +133,10 @@
   --color-amber-foreground: var(--amber-foreground);
   --color-teal: var(--teal);
   --color-teal-foreground: var(--teal-foreground);
+  --color-emerald: var(--emerald);
+  --color-emerald-foreground: var(--emerald-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -196,6 +204,8 @@
   .bg-blueprint-fade {
     background: linear-gradient(180deg, hsl(208 55% 97%) 0%, hsl(208 45% 98.5%) 50%, hsl(208 50% 99%) 100%);
   }
+
+
 
   /* ===== L-shaped corner marks (图纸定位角标) ===== */
   .corner-marks {
@@ -491,4 +501,70 @@
      font-size: 0.95rem;
      line-height: 1.6;
    }
+}
+
+/* ===== Hero 呼吸网格（径向渐变呼吸动效，6s 循环，主色透明度 0.05） ===== */
+@utility hero-breathing {
+  background: radial-gradient(
+    ellipse 70% 55% at 50% 18%,
+    rgba(18, 165, 181, 0.05) 0%,
+    rgba(15, 76, 129, 0.05) 42%,
+    transparent 72%
+  );
+  animation: hero-breathe 6s ease-in-out infinite;
+  will-change: opacity;
+}
+@keyframes hero-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* ===== 工程蓝图玻璃拟态（Glassmorphism） ===== */
+@utility glass-blueprint {
+  background: rgba(15, 76, 129, 0.05);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 8px 32px rgba(2, 32, 71, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+@utility glass-blueprint-hover {
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.24);
+    box-shadow:
+      0 12px 40px rgba(2, 32, 71, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* ===== Hero 3D 线框缓慢自转（10s/圈，hover 暂停 + 顶层柱高亮） ===== */
+@utility hero-spin {
+  animation: hero-spin 10s linear infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+  will-change: transform;
+}
+@utility hero-spin-paused {
+  .group:hover & {
+    animation-play-state: paused;
+  }
+}
+@keyframes hero-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@utility hero-top-column {
+  stroke: rgba(34, 211, 238, 0);
+  stroke-width: 2.5;
+  opacity: 0;
+  transition: stroke 0.25s ease, opacity 0.25s ease;
+}
+@utility hero-top-column-active {
+  .group:hover & {
+    stroke: #22d3ee;
+    opacity: 0.95;
+    filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.75));
+  }
 }

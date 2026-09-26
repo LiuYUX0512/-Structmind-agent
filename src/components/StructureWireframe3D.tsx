@@ -7,6 +7,8 @@ interface StructureWireframeProps {
   scheme?: IStructureScheme | null;
   /** 规范校核结果（方案级：{ schemeId: { seismic: { checks }, fire: { checks } } }），用于违规警示 */
   codeChecks?: Record<string, unknown>;
+  /** Hero 待机模式：线框缓慢自转（10s/圈），hover 暂停并高亮顶层柱 */
+  autoRotate?: boolean;
 }
 
 /**
@@ -215,7 +217,7 @@ function deriveStructureComponents(
  * 纯 SVG 2.5D 线框图（等轴测投影）
  * 根据不同结构体系差异化渲染：梁柱网格、剪力墙、核心筒、桁架 等
  */
-function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWireframeProps) {
+function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: StructureWireframeProps) {
   const geom = useMemo(() => deriveGeometry(params), [params]);
   const struct = useMemo(
     () => deriveStructureComponents(scheme?.id, geom.baysX, geom.baysZ, params.floors),
@@ -483,6 +485,16 @@ function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWirefram
               opacity={colOpacity}
               style={isFront ? { filter: `drop-shadow(0 0 3px ${colColor}88)` } : undefined}
             />
+            {/* Hero 待机模式：顶层柱段（hover 时青色高亮，由 .group:hover .hero-top-column 驱动） */}
+            {autoRotate && params.floors > 0 && (
+              <line
+                className="hero-top-column hero-top-column-active"
+                x1={project(x, Math.max(0, (params.floors - 1) * geom.floorHeight), z)[0].toFixed(1)}
+                y1={project(x, Math.max(0, (params.floors - 1) * geom.floorHeight), z)[1].toFixed(1)}
+                x2={top[0].toFixed(1)}
+                y2={top[1].toFixed(1)}
+              />
+            )}
             {/* 底部加强区：加粗段（砌体和纯剪力墙没有） */}
             {isBottomReinforce && !struct.isMasonry && (
               <line
@@ -1048,7 +1060,7 @@ function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWirefram
   return (
     <div
       ref={containerRef}
-      className="relative flex h-full w-full items-center justify-center bg-[#f4f7fb] select-none"
+      className="group relative flex h-full w-full items-center justify-center bg-[#f4f7fb] select-none"
       style={{
         touchAction: 'none',
         userSelect: 'none',
@@ -1095,7 +1107,7 @@ function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWirefram
             className="animate-pulse"
           />
         )}
-        {elements}
+        {autoRotate ? <g className="hero-spin hero-spin-paused">{elements}</g> : elements}
       </svg>
 
       {/* 规范校核警示条 */}
@@ -1144,7 +1156,7 @@ function StructureWireframeSVG({ params, scheme, codeChecks }: StructureWirefram
   );
 }
 
-function StructureWireframe3D({ params, scheme, codeChecks }: StructureWireframeProps) {
+function StructureWireframe3D({ params, scheme, codeChecks, autoRotate }: StructureWireframeProps) {
   // 空数据保护
   if (!params || !params.floors || !params.area) {
     return (
@@ -1163,7 +1175,7 @@ function StructureWireframe3D({ params, scheme, codeChecks }: StructureWireframe
         </div>
       }
     >
-      <StructureWireframeSVG params={params} scheme={scheme} codeChecks={codeChecks} />
+      <StructureWireframeSVG params={params} scheme={scheme} codeChecks={codeChecks} autoRotate={autoRotate} />
     </ErrorBoundary>
   );
 }
