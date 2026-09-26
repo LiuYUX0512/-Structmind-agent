@@ -1,0 +1,185 @@
+<!doctype html>
+<html style="margin:0;padding:0;">
+<title>智构 StructMind · 系统技术架构图</title>
+<div style="width:100%;box-sizing:border-box;background:#040b1a;color:#e2e8f0;font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;padding:32px 40px 40px;">
+
+  <!-- 标题区 -->
+  <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #1e3a5f;padding-bottom:14px;margin-bottom:24px;">
+    <div>
+      <div style="font-size:30px;font-weight:800;letter-spacing:2px;color:#f8fafc;">智构 StructMind<span style="color:#2dd4bf;"> · 系统技术架构图</span></div>
+      <div style="font-size:13px;color:#64748b;letter-spacing:1px;margin-top:6px;">STRUCTURAL OPTIMIZATION WORKBENCH · MULTI-AGENT ARCHITECTURE · 第一届「海之子杯」AI 智能体挑战赛</div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#64748b;line-height:1.7;">
+      <div style="color:#2dd4bf;font-weight:600;">ARCHITECTURE · REV 1.0</div>
+      <div>SHEET 001 · 2026-09</div>
+      <div>智能设计与方案优化赛道</div>
+    </div>
+  </div>
+
+  <!-- 第 0 层：用户输入 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <div style="background:linear-gradient(135deg,#0ea5e9,#0284c7);border:1px solid #38bdf8;border-radius:12px;padding:14px 34px;text-align:center;box-shadow:0 6px 24px rgba(14,165,233,.25);">
+      <div style="font-size:15px;font-weight:700;color:#fff;">👤 用户输入工程参数</div>
+      <div style="font-size:12px;color:#bae6fd;margin-top:5px;">层数 · 面积 · 跨度 · 设防烈度 · 预算 · 场地类别 · 用途</div>
+    </div>
+  </div>
+
+  <!-- 向下箭头 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <svg width="40" height="34" viewBox="0 0 40 34"><path d="M20 0 L20 24 M8 16 L20 30 L32 16" stroke="#38bdf8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- 第 1 层：意图理解 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <div style="width:78%;background:linear-gradient(135deg,#111c33,#0d1526);border:1.5px solid #2563eb;border-radius:14px;padding:14px 22px;box-shadow:0 4px 20px rgba(37,99,235,.15);">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="min-width:110px;text-align:center;border-right:1px solid #1e3a5f;padding-right:16px;">
+          <div style="font-size:13px;color:#93c5fd;font-weight:600;">A0</div>
+          <div style="font-size:16px;font-weight:700;color:#f1f5f9;">意图理解 Agent</div>
+          <div style="font-size:11px;color:#64748b;margin-top:3px;">intent.ts</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div style="background:#0f1d38;border:1px solid #2563eb66;border-radius:8px;padding:6px 12px;font-size:12px;color:#bfdbfe;">🧠 大模型：参数语义归一</div>
+          <div style="background:#0f1d38;border:1px solid #2563eb66;border-radius:8px;padding:6px 12px;font-size:12px;color:#bfdbfe;">📋 参数完整性校验</div>
+          <div style="background:#0f1d38;border:1px solid #2563eb66;border-radius:8px;padding:6px 12px;font-size:12px;color:#bfdbfe;">🧩 模式识别（住宅/教学楼/厂房）</div>
+          <div style="background:#0f1d38;border:1px solid #2563eb66;border-radius:8px;padding:6px 12px;font-size:12px;color:#bfdbfe;">➕ 缺省参数智能补全</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 箭头 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <svg width="40" height="34" viewBox="0 0 40 34"><path d="M20 0 L20 24 M8 16 L20 30 L32 16" stroke="#38bdf8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- 第 2-4 层：四子 Agent 协同 -->
+  <div style="display:flex;gap:16px;justify-content:center;margin-bottom:14px;">
+    <!-- A1 方案创作 -->
+    <div style="flex:1;max-width:270px;background:linear-gradient(135deg,#0b2b26,#081f1c);border:1.5px solid #10b981;border-radius:14px;padding:14px;box-shadow:0 4px 20px rgba(16,185,129,.12);">
+      <div style="text-align:center;border-bottom:1px solid #155e47;padding-bottom:10px;margin-bottom:10px;">
+        <div style="font-size:13px;color:#6ee7b7;font-weight:600;">A1 · 方案创作工程师</div>
+        <div style="font-size:11px;color:#4b8a74;">ArchitectAgent · pipeline.ts</div>
+      </div>
+      <div style="font-size:12px;color:#a7f3d0;line-height:2;">
+        · 结构体系库检索<br>
+        · 初始截面估算<br>
+        · 生成 3 套候选方案<br>
+        · 经验公式内力估算
+      </div>
+    </div>
+
+    <!-- 连接箭头 A1→A2 -->
+    <div style="display:flex;align-items:center;">
+      <svg width="34" height="24" viewBox="0 0 34 24"><path d="M0 12 H24 M14 4 L24 12 L14 20" stroke="#10b981" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+
+    <!-- A2 规范校核 -->
+    <div style="flex:1;max-width:270px;background:linear-gradient(135deg,#2a2410,#221c0e);border:1.5px solid #f59e0b;border-radius:14px;padding:14px;box-shadow:0 4px 20px rgba(245,158,11,.12);">
+      <div style="text-align:center;border-bottom:1px solid #5c4a15;padding-bottom:10px;margin-bottom:10px;">
+        <div style="font-size:13px;color:#fcd34d;font-weight:600;">A2 · 规范校核工程师</div>
+        <div style="font-size:11px;color:#9a7b2e;">CodeAgent · real-engine.ts</div>
+      </div>
+      <div style="font-size:12px;color:#fde68a;line-height:2;">
+        · 抗震等级判定<br>
+        · 位移角 / 轴压比校验<br>
+        · 耐火极限逐条判定<br>
+        · GB 55002 · GB 50011 规则引擎
+      </div>
+    </div>
+
+    <!-- 连接箭头 A2→A3 -->
+    <div style="display:flex;align-items:center;">
+      <svg width="34" height="24" viewBox="0 0 34 24"><path d="M0 12 H24 M14 4 L24 12 L14 20" stroke="#f59e0b" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+
+    <!-- A3 经济评估 -->
+    <div style="flex:1;max-width:270px;background:linear-gradient(135deg,#1a1a3a,#141430);border:1.5px solid #8b5cf6;border-radius:14px;padding:14px;box-shadow:0 4px 20px rgba(139,92,246,.12);">
+      <div style="text-align:center;border-bottom:1px solid #3b2f6e;padding-bottom:10px;margin-bottom:10px;">
+        <div style="font-size:13px;color:#c4b5fd;font-weight:600;">A3 · 经济评估工程师</div>
+        <div style="font-size:11px;color:#6d5aa8;">EconomistAgent · optimizer.ts</div>
+      </div>
+      <div style="font-size:12px;color:#ddd6fe;line-height:2;">
+        · 单位面积造价估算<br>
+        · 工期与施工难度<br>
+        · 碳排放因子计算<br>
+        · 可持续性评分
+      </div>
+    </div>
+  </div>
+
+  <!-- 第 4 层：总工评审 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <div style="width:88%;background:linear-gradient(135deg,#2a1030,#200b26);border:1.5px solid #d946ef;border-radius:14px;padding:14px 22px;box-shadow:0 4px 20px rgba(217,70,239,.12);">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div style="min-width:120px;text-align:center;border-right:1px solid #4a1a52;padding-right:16px;">
+          <div style="font-size:13px;color:#f0abfc;font-weight:600;">A4</div>
+          <div style="font-size:16px;font-weight:700;color:#f1f5f9;">总工评审 Agent</div>
+          <div style="font-size:11px;color:#7d5a86;margin-top:3px;">ChiefAgent · pipeline.ts</div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <div style="background:#1c0f26;border:1px solid #d946ef55;border-radius:8px;padding:6px 12px;font-size:12px;color:#f5d0fe;">🤔 反思模式：自我质疑</div>
+          <div style="background:#1c0f26;border:1px solid #d946ef55;border-radius:8px;padding:6px 12px;font-size:12px;color:#f5d0fe;">⚖️ 四维加权评分（造价25%·工期25%·安全30%·绿色20%）</div>
+          <div style="background:#1c0f26;border:1px solid #d946ef55;border-radius:8px;padding:6px 12px;font-size:12px;color:#f5d0fe;">🔄 自主决策回环：不满足则替换重算</div>
+          <div style="background:#1c0f26;border:1px solid #d946ef55;border-radius:8px;padding:6px 12px;font-size:12px;color:#f5d0fe;">⚠️ 风险提示 + 置信度评估</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 箭头 -->
+  <div style="display:flex;justify-content:center;margin-bottom:18px;">
+    <svg width="40" height="34" viewBox="0 0 40 34"><path d="M20 0 L20 24 M8 16 L20 30 L32 16" stroke="#38bdf8" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- 输出层 -->
+  <div style="display:flex;gap:16px;justify-content:center;margin-bottom:26px;">
+    <div style="flex:1;max-width:200px;background:#0d1b2e;border:1px solid #38bdf8;border-radius:12px;padding:12px 16px;text-align:center;">
+      <div style="font-size:13px;font-weight:700;color:#7dd3fc;">📊 综合比选结果</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">方案排序 · 推荐理由 · 对比矩阵</div>
+    </div>
+    <div style="flex:1;max-width:200px;background:#0d1b2e;border:1px solid #38bdf8;border-radius:12px;padding:12px 16px;text-align:center;">
+      <div style="font-size:13px;font-weight:700;color:#7dd3fc;">✅ 规范校核报告</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">逐条 pass / warn / fail · 限值对照</div>
+    </div>
+    <div style="flex:1;max-width:200px;background:#0d1b2e;border:1px solid #38bdf8;border-radius:12px;padding:12px 16px;text-align:center;">
+      <div style="font-size:13px;font-weight:700;color:#7dd3fc;">🧭 智能问答</div>
+      <div style="font-size:11px;color:#64748b;margin-top:4px;">专业知识库检索增强生成</div>
+    </div>
+  </div>
+
+  <!-- 底部：关键设计原则 + 支撑层 -->
+  <div style="display:flex;gap:16px;">
+    <!-- 左侧：设计原则 -->
+    <div style="flex:1.2;background:#0a1526;border:1px solid #1e3a5f;border-radius:12px;padding:16px 18px;">
+      <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:10px;letter-spacing:1px;">🔑 关键设计原则</div>
+      <div style="font-size:12px;color:#94a3b8;line-height:2;">
+        <div><span style="color:#2dd4bf;font-weight:600;">① 大模型只做调度员 / 翻译官</span> — 数值计算零幻觉</div>
+        <div><span style="color:#2dd4bf;font-weight:600;">② 规范校核走硬逻辑</span> — 规则引擎判定，非向量模糊检索</div>
+        <div><span style="color:#2dd4bf;font-weight:600;">③ 推理轨迹可溯源</span> — trace-engine 全流程留痕</div>
+        <div><span style="color:#2dd4bf;font-weight:600;">④ Human-in-the-loop</span> — 最终决策权始终在持证工程师</div>
+      </div>
+    </div>
+
+    <!-- 右侧：支撑层 -->
+    <div style="flex:1;background:#0a1526;border:1px solid #1e3a5f;border-radius:12px;padding:16px 18px;">
+      <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:10px;letter-spacing:1px;">⚙️ 支撑层</div>
+      <div style="font-size:12px;color:#94a3b8;line-height:2;">
+        <div><span style="color:#38bdf8;">trace-engine.ts</span> — 推理轨迹引擎（全流程可溯源）</div>
+        <div><span style="color:#38bdf8;">tools.ts</span> — Agent 工具库（规范表 / 造价库 / 碳排库）</div>
+        <div><span style="color:#38bdf8;">types.ts</span> — 领域类型定义</div>
+        <div><span style="color:#38bdf8;">React 19 + Vite 8 + ECharts 6</span> — 前端可视化</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 数据流标注 -->
+  <div style="margin-top:16px;background:#0a1526;border:1px dashed #1e3a5f;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b;">
+    <span style="color:#38bdf8;font-weight:600;">数据流：</span>
+    <span>工程参数 → 意图解析 → 方案生成（3 候选）→ 逐条规范校核 → 多目标经济评估 → 加权评审 → 推荐方案 + 风险提示</span>
+    <span style="margin-left:auto;color:#2dd4bf;font-size:11px;">注：数值计算均由确定性规则引擎完成，大模型不参与具体力学计算</span>
+  </div>
+
+  <div style="margin-top:14px;text-align:center;font-size:11px;color:#475569;letter-spacing:1px;">智构 StructMind™ · 为人民建好房 · 为工友谋幸福</div>
+</div>
+</html>
