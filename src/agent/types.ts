@@ -241,6 +241,10 @@ export interface IEngineConfig {
   systemPrompt?: string;
   /** 真实模式校核回退闭环开关（默认开启：Code 发现违规 → Architect 重出 → 复核） */
   allowRecheck?: boolean;
+  /** LLM 请求自动重试最大次数（默认 2，仅网络错误/5xx 触发；4xx/超时不重试） */
+  retryMax?: number;
+  /** 重试退避基数 ms（默认 800，第 N 次重试延迟 = base * N） */
+  retryBaseDelayMs?: number;
 }
 
 /** 对话意图类型 */

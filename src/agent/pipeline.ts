@@ -101,6 +101,9 @@ export class AgentPipeline {
   private onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void;
   private onDegrade?: (reason: string) => void;
 
+  /** 单例推理引擎：四个子 Agent 共享同一个 RealEngine 实例（配置/重试参数复用） */
+  private engine: RealEngine;
+
   constructor(
     params: IProjectParams,
     weights?: IWeightConfig,
@@ -113,6 +116,7 @@ export class AgentPipeline {
     this.config = config || {};
     this.onProgress = onProgress;
     this.onDegrade = onDegrade;
+    this.engine = new RealEngine(this.params, this.weights, this.config);
   }
 
   /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
@@ -234,6 +238,7 @@ export class AgentPipeline {
     this.actionLog = [];
     this.conclusions = [];
     this.correctionMeta = null;
+    this.engine.reset();
   }
 
   /** 第一步：方案创作工程师（feedback 非空 = 校核回退闭环打回重出） */
@@ -241,8 +246,7 @@ export class AgentPipeline {
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
-      // 真实模式
-      const engine = new RealEngine(this.params, this.weights, this.config);
+      // 真实模式：共享单例引擎；重出（feedback 非空）时在同一会话续写，保证推理连贯
       let prompt = buildAgentPrompt('architect', this.params) +
         '\n\n请调用 query_structure_systems 工具筛选出最适合本项目的 3 个候选结构方案，并给出简要的适用性评述。';
       if (feedback) {
@@ -251,10 +255,11 @@ export class AgentPipeline {
           feedback +
           '\n\n请重新选型：优先选择能通过上述规范校核的候选方案；若某方案确实难以满足，请替换为更合适的结构体系。';
       }
-      const result = await engine.run(prompt, 'architect');
+      const result = await this.engine.run(prompt, 'architect', { appendHistory: !!feedback });
 
-      // 解析候选方案（从日志中找 query_structure_systems 的调用结果）
-      const qsResult = engine.getActionLog().find(
+      // 解析候选方案（从日志中找【最新】的 query_structure_systems 调用结果——
+      // 引擎单例下日志跨轮累积，find 首条会拿到重出前的旧候选）
+      const qsResult = [...this.engine.getActionLog()].reverse().find(
         (log) => log.tool === 'query_structure_systems' && log.type === 'tool_result'
       );
       if (qsResult?.result && typeof qsResult.result === 'object') {
@@ -288,14 +293,13 @@ export class AgentPipeline {
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
-      const engine = new RealEngine(this.params, this.weights, this.config);
       const prompt = buildAgentPrompt('code', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 check_seismic_requirements 和 check_fire_requirements 工具进行规范校核，给出逐条判定和条文依据。';
-      const result = await engine.run(prompt, 'code');
+      const result = await this.engine.run(prompt, 'code');
 
-      // 尝试从日志中提取 codeChecks
-      const allLogs = engine.getActionLog();
+      // 尝试从日志中提取 codeChecks（getActionLog 返回引擎全量日志，按工具名精确筛选不受前段影响）
+      const allLogs = this.engine.getActionLog();
       const seisCallLogs = allLogs.filter(
         (log) => log.tool === 'check_seismic_requirements' && log.type === 'tool_call'
       );
@@ -384,19 +388,18 @@ export class AgentPipeline {
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
-      const engine = new RealEngine(this.params, this.weights, this.config);
       const prompt = buildAgentPrompt('economist', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 estimate_cost、estimate_schedule、estimate_precast_rate、estimate_carbon、assess_construction_risk 工具进行经济与绿色指标评估。';
-      const result = await engine.run(prompt, 'economist');
+      const result = await this.engine.run(prompt, 'economist');
 
       // 匹配 metrics：用 toolCallId 精确配对「systemId + toolName → result」，
       // 避免调用交错或某次结果缺失导致错位（fallback：按顺序 index）
       const toolNames = ['estimate_cost', 'estimate_schedule', 'estimate_precast_rate', 'estimate_carbon', 'assess_construction_risk'] as const;
-      const callLogs = engine.getActionLog().filter(
+      const callLogs = this.engine.getActionLog().filter(
         (log) => log.type === 'tool_call' && toolNames.includes(log.tool as typeof toolNames[number])
       );
-      const resultLogs = engine.getActionLog().filter(
+      const resultLogs = this.engine.getActionLog().filter(
         (log) => log.type === 'tool_result' && toolNames.includes(log.tool as typeof toolNames[number])
       );
       const resultByCallId = new Map<string, unknown>();
@@ -449,7 +452,6 @@ export class AgentPipeline {
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
-      const engine = new RealEngine(this.params, this.weights, this.config);
       // 校核状态注入：Chief 仲裁时把规范校核结果作为关键决策因子（对齐演示模式"总工把关"）
       const violationsNow = this.collectViolations();
       const checkStatus = violationsNow.length > 0
@@ -476,10 +478,10 @@ export class AgentPipeline {
         '\n   - 什么情况下需要重新评估（触发条件）' +
         '\n   - 后续深化设计时重点关注什么' +
         '\n6. 下一步优化建议';
-      const result = await engine.run(prompt, 'chief');
+      const result = await this.engine.run(prompt, 'chief');
 
       // 从日志中提取 compare_schemes 结果
-      const compareLog = engine.getActionLog().find(
+      const compareLog = this.engine.getActionLog().find(
         (log) => log.tool === 'compare_schemes' && log.type === 'tool_result'
       );
       const compareResult = compareLog?.result as

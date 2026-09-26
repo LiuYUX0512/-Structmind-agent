@@ -77,20 +77,21 @@ const buildMockResponse = (messages: any[]): any => {
   const hasFeedback = u.includes('上一轮规范校核反馈') || u.includes('校核未通过');
 
   if (agent === 'architect') {
+    // 重出优先：收到校核反馈时必须重新调用工具选型（真实 LLM 在续写会话中也会如此）
+    if (hasFeedback && !architectRedone) {
+      architectRedone = true;
+      return {
+        role: 'assistant',
+        content: null,
+        tool_calls: [toolCall('query_structure_systems', { filters: { buildingType: 'residential', floors: 30, seismicIntensity: '8', mainSpan: 8.4, budget: 5000, preferPass: true } })],
+      };
+    }
     if (messages.some((m: any) => m.role === 'tool')) {
       return {
         role: 'assistant',
         content: architectRedone
           ? '**方案选型结论（重出）**\n经校核反馈重新选型，建议采用框架-剪力墙结构、剪力墙结构、钢结构作为候选方案。'
           : '**方案选型结论**\n经筛选，建议采用框架结构、剪力墙结构、钢结构作为候选方案进行比选。',
-      };
-    }
-    if (hasFeedback) {
-      architectRedone = true;
-      return {
-        role: 'assistant',
-        content: null,
-        tool_calls: [toolCall('query_structure_systems', { filters: { buildingType: 'residential', floors: 30, seismicIntensity: '8', mainSpan: 8.4, budget: 5000, preferPass: true } })],
       };
     }
     return {
@@ -385,6 +386,56 @@ async function scenarioShuffle() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+// ---------- 场景 4：LLM 请求自动重试（网络抖动/5xx 不崩管线） ----------
+async function scenarioRetry() {
+  callSeq = 0;
+  architectRedone = false;
+  shuffleCode = false;
+  installToolPatches();
+
+  let firstCall = true;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    if (firstCall) {
+      // 第一次请求直接 503（模拟服务抖动）→ 引擎应自动重试
+      firstCall = false;
+      return new Response('service unavailable', { status: 503 });
+    }
+    const body = JSON.parse(String(init?.body));
+    const message = buildMockResponse(body.messages);
+    return new Response(
+      JSON.stringify({ choices: [{ message }], usage: { total_tokens: 0 } }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  const result = await runAgentPipeline(
+    PARAMS,
+    undefined,
+    { mode: 'real', endpoint: 'https://api.deepseek.com/v1', apiKey: 'sk-mock-not-real', model: 'deepseek-chat', maxSteps: 20 }
+  );
+  globalThis.fetch = originalFetch;
+
+  const retryLogs = result.actionLog.filter(
+    (l: any) => typeof l.content === 'string' && l.content.includes('自动重试')
+  );
+  const checks: Array<[string, boolean, string]> = [
+    ['重试日志已写入 actionLog（用户可见）', retryLogs.length >= 1, `重试日志 ${retryLogs.length} 条`],
+    ['重试后管线正常完成（未降级）', !result.degraded, `degraded=${JSON.stringify(result.degraded)}`],
+    ['结果完整（schemes≥2）', result.schemes.length >= 2, `schemes ${result.schemes.length}`],
+    ['recommended 有效', !!result.recommended?.schemeId, `rec=${result.recommended?.schemeId}`],
+    ['结论完整（四 Agent）', result.conclusions.length >= 4, `实际 ${result.conclusions.length}`],
+  ];
+
+  console.log('\n===== 场景 4：LLM 请求自动重试（网络抖动不崩管线） =====\n');
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -394,10 +445,11 @@ scopedStorage.setItem(
 const r1 = await scenarioRecheck();
 const r2 = await scenarioDegrade();
 const r3 = await scenarioShuffle();
+const r4 = await scenarioRetry();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} ----`);
-if (r1.ok && r2.ok && r3.ok) {
-  console.log('🎯 真实模式升级专项验证全部通过：回退闭环生效 + 崩溃降级保命机制生效 + 乱序调用数据零错位');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

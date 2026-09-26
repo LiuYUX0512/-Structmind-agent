@@ -155,37 +155,22 @@ export class RealEngine {
     }));
   }
 
-  /** 执行一次 LLM 请求 */
-  private async callLLM(messages: ILLMMessage[]): Promise<ILLMMessage> {
-    if (!this.config.endpoint || !this.config.apiKey) {
-      throw new Error('未配置 API Endpoint 或 API Key');
-    }
-
+  /** 单次 LLM 请求（超时 30s；失败抛错，由 callLLM 判定是否重试） */
+  private async requestLLM(
+    targetUrl: string,
+    headers: Record<string, string>,
+    body: string
+  ): Promise<ILLMMessage> {
     const controller = new AbortController();
     const timeoutMs = 30000;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response: Response;
 
-    // 代理模式判定：相对路径 endpoint（如 /api/chat）→ 走服务端安全代理（Key 只存服务端）
-    const isProxy = this.config.endpoint.startsWith('/');
-    const targetUrl = isProxy ? this.config.endpoint : `${this.config.endpoint}/chat/completions`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (!isProxy && this.config.apiKey) {
-      headers.Authorization = `Bearer ${this.config.apiKey}`;
-    }
-
     try {
       response = await fetch(targetUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          model: this.config.model,
-          messages,
-          tools: this.buildToolsDefinition(),
-          tool_choice: 'auto',
-          temperature: 0.3,
-          stream: false,
-        }),
+        body,
         signal: controller.signal,
       });
     } catch (e) {
@@ -214,6 +199,63 @@ export class RealEngine {
     }
 
     return data.choices[0].message;
+  }
+
+  /** 判定错误是否可重试：仅网络层异常与 5xx；4xx（如余额不足 402）、超时、配置缺失不重试 */
+  private isRetryableError(e: unknown): boolean {
+    const msg = (e as Error)?.message || '';
+    if (msg.includes('超时')) return false;
+    if (msg.includes('未配置')) return false;
+    if (msg.includes('返回格式异常')) return false;
+    const m = msg.match(/\((\d{3})\)/);
+    if (m) {
+      const code = parseInt(m[1], 10);
+      return code >= 500;
+    }
+    // 无 HTTP 状态码 → fetch 网络层异常（连接失败/断网等）
+    return msg.includes('LLM 请求失败');
+  }
+
+  /** 执行一次 LLM 请求（带自动重试：网络错误/5xx 重试 2 次，退避 800ms×次数） */
+  private async callLLM(messages: ILLMMessage[]): Promise<ILLMMessage> {
+    if (!this.config.endpoint || !this.config.apiKey) {
+      throw new Error('未配置 API Endpoint 或 API Key');
+    }
+
+    // 代理模式判定：相对路径 endpoint（如 /api/chat）→ 走服务端安全代理（Key 只存服务端）
+    const isProxy = this.config.endpoint.startsWith('/');
+    const targetUrl = isProxy ? this.config.endpoint : `${this.config.endpoint}/chat/completions`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isProxy && this.config.apiKey) {
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
+    }
+    const body = JSON.stringify({
+      model: this.config.model,
+      messages,
+      tools: this.buildToolsDefinition(),
+      tool_choice: 'auto',
+      temperature: 0.3,
+      stream: false,
+    });
+
+    const maxRetries = this.config.retryMax ?? 2;
+    const baseDelay = this.config.retryBaseDelayMs ?? 800;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.requestLLM(targetUrl, headers, body);
+      } catch (e) {
+        if (!this.isRetryableError(e) || attempt >= maxRetries) throw e;
+        const delay = baseDelay * (attempt + 1);
+        this.pushLog({
+          type: 'think',
+          agent: this.agentLabel,
+          content: `⚠️ LLM 请求异常，正在自动重试（${attempt + 1}/${maxRetries}），${(delay / 1000).toFixed(1)}s 后重试...`,
+        });
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    throw new Error('LLM 请求失败：重试次数已用尽');
   }
 
   /** 执行工具调用并返回结果消息 */
@@ -305,22 +347,32 @@ export class RealEngine {
    * 运行完整推理循环（非流式）
    * 遵循 plan → act → observe → reflect agentic loop
    */
-  async run(userPrompt: string, agentLabel = 'real'): Promise<{
+  async run(
+    userPrompt: string,
+    agentLabel = 'real',
+    opts?: { appendHistory?: boolean }
+  ): Promise<{
     finalAnswer: string;
     actionLog: IAgentActionLog[];
   }> {
     this.agentLabel = agentLabel as IAgentActionLog['agent'];
-    // 初始化 messages
-    this.messages = [
-      {
-        role: 'system',
-        content: this.config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-      },
-      {
-        role: 'user',
-        content: userPrompt,
-      },
-    ];
+    const startLogIdx = this.actionLog.length;
+    if (opts?.appendHistory && this.messages.length > 0) {
+      // 同一会话续写：重出场景在既有推理历史后追加新指令（Architect 看到自己上一轮方案与违规反馈）
+      this.messages.push({ role: 'user', content: userPrompt });
+    } else {
+      // 默认：独立会话（各 Agent 任务/系统提示不同，隔离避免上下文污染；token 只增必要历史）
+      this.messages = [
+        {
+          role: 'system',
+          content: this.config.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        },
+        {
+          role: 'user',
+          content: userPrompt,
+        },
+      ];
+    }
 
     this.pushLog({
       type: 'think',
@@ -342,7 +394,7 @@ export class RealEngine {
         });
         return {
           finalAnswer: response.content || '',
-          actionLog: [...this.actionLog],
+          actionLog: this.actionLog.slice(startLogIdx),
         };
       }
 
@@ -372,8 +424,15 @@ export class RealEngine {
     const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
     return {
       finalAnswer: lastAssistant?.content || '',
-      actionLog: [...this.actionLog],
+      actionLog: this.actionLog.slice(startLogIdx),
     };
+  }
+
+  /** 重置引擎内部状态（崩溃降级/重跑前调用，避免旧上下文污染新会话） */
+  reset(): void {
+    this.messages = [];
+    this.actionLog = [];
+    this.stepCounter = 0;
   }
 
   /** 获取行动日志 */
