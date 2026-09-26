@@ -855,6 +855,38 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
     }
   }
 
+  // ---------- 6.5 跨度尺寸标注（底部前沿，与设置参数直接对应） ----------
+  {
+    const dimY = 0;
+    const p0 = project(0, dimY, 0);
+    const p1 = project(geom.gridX, dimY, 0);
+    const mid = project(geom.gridX / 2, dimY, 0);
+    const below = 10; // 尺寸线相对前沿的屏幕像素下移
+    const dimColor = '#0f766e';
+    elements.push(
+      <g key="span-dim" opacity="0.7">
+        {/* 尺寸界线 */}
+        <line x1={p0[0].toFixed(1)} y1={p0[1].toFixed(1)} x2={p0[0].toFixed(1)} y2={(p0[1] + below).toFixed(1)} stroke={dimColor} strokeWidth="0.7" />
+        <line x1={p1[0].toFixed(1)} y1={p1[1].toFixed(1)} x2={p1[0].toFixed(1)} y2={(p1[1] + below).toFixed(1)} stroke={dimColor} strokeWidth="0.7" />
+        {/* 尺寸线 */}
+        <line x1={p0[0].toFixed(1)} y1={(p0[1] + below).toFixed(1)} x2={p1[0].toFixed(1)} y2={(p1[1] + below).toFixed(1)} stroke={dimColor} strokeWidth="0.8" />
+        {/* 端部 45° 斜短线 */}
+        <line x1={p0[0].toFixed(1)} y1={(p0[1] + below).toFixed(1)} x2={(p0[0] + 3.5).toFixed(1)} y2={(p0[1] + below - 3.5).toFixed(1)} stroke={dimColor} strokeWidth="0.8" />
+        <line x1={p1[0].toFixed(1)} y1={(p1[1] + below).toFixed(1)} x2={(p1[0] - 3.5).toFixed(1)} y2={(p1[1] + below - 3.5).toFixed(1)} stroke={dimColor} strokeWidth="0.8" />
+        {/* 文字：跨度 = 用户设置的主要跨度（gridX 由 mainSpan 推导） */}
+        <text
+          x={mid[0].toFixed(1)}
+          y={(p0[1] + below + 12).toFixed(1)}
+          textAnchor="middle"
+          fill={dimColor}
+          style={{ fontSize: '9px', fontFamily: 'monospace', fontWeight: 'bold' }}
+        >
+          跨度 {geom.gridX.toFixed(1)}m
+        </text>
+      </g>
+    );
+  }
+
   // ---------- 7. 楼层编号标注 ----------
   const labelStep = Math.max(1, Math.floor(params.floors / 5));
   const floorLabels: React.ReactNode[] = [];
@@ -916,7 +948,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
           fill="#64748b"
           style={{ fontSize: '8px', fontFamily: 'monospace', writingMode: 'vertical-rl' } as React.CSSProperties}
         >
-          H ≈ {geom.totalHeight.toFixed(0)}m
+          H ≈ {geom.totalHeight.toFixed(1)}m
         </text>
       </g>
     );
@@ -925,7 +957,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
   // ===== 动态自适应 viewBox =====
   // 用 zoom=1 的基准投影计算模型实际包围盒（含标注点），加 padding；
   // 再除以当前 zoom —— 放大看细节、缩小看全貌，任何楼层高度都完整显示
-  const pad = 30;
+  const pad = 38;
   // bbox 使用固定角度的独立投影计算（不依赖 rotateAngle/zoom，旋转/缩放时 viewBox 不跳动），
   // 并对 0°/45°/90° 取包围盒并集，保证任意旋转角度下模型都完整落在可视范围内
   const bbox = useMemo(() => {
@@ -1044,7 +1076,7 @@ function StructureWireframeSVG({ params, scheme }: StructureWireframeProps) {
       {/* 信息角标 - 右下：参数提示 */}
       <div className="pointer-events-none absolute bottom-2 right-3 font-mono text-[9px] text-muted-foreground/70 tracking-wider text-right">
         <div>拖拽旋转 · 滚轮缩放</div>
-        <div>{params.floors}F · {geom.totalHeight.toFixed(0)}m{zoom !== 1 ? ` · ${(zoom * 100).toFixed(0)}%` : ''}</div>
+        <div>跨度 {geom.gridX.toFixed(1)}m · {params.floors}F · 总高 {geom.totalHeight.toFixed(1)}m{zoom !== 1 ? ` · ${(zoom * 100).toFixed(0)}%` : ''}</div>
       </div>
     </div>
   );
