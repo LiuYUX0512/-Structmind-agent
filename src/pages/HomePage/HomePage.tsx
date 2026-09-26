@@ -1784,18 +1784,6 @@ ${dis || '- （待补充）'}
       />
        </footer>
 
-       {/* ====== 打印报告视图（仅打印时显示）====== */}
-       <div className="print-only">
-         <ReportPrintView
-           params={projectParams}
-           schemes={schemes}
-           recommendation={recommendation}
-           weights={weights}
-           isDemoMode={isDemoMode}
-           advice={lastAdvice}
-           codeChecks={lastCodeChecks}
-         />
-       </div>
 
        {/* 打印专用样式 */}
        <style>{`
@@ -1832,6 +1820,19 @@ ${dis || '- （待补充）'}
          }
        `}</style>
      </div>
+
+       {/* ====== 打印报告视图（仅打印时显示；位于 app-shell 之外，避免随主界面一起被隐藏）====== */}
+       <div className="print-only">
+         <ReportPrintView
+           params={projectParams}
+           schemes={schemes}
+           recommendation={recommendation}
+           weights={weights}
+           isDemoMode={isDemoMode}
+           advice={lastAdvice}
+           codeChecks={lastCodeChecks}
+         />
+       </div>
      </>
    );
  }
