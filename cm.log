@@ -1,0 +1,47 @@
+﻿git : 
+所在位置 行:1 字符: 84
++ ... git add -A; git -c user.name="LiuYUX0512" -c user.email="5399301912@1 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+> miaoda-vite-react-app@0.1.0 precommit
+> npm run lint
+
+
+> miaoda-vite-react-app@0.1.0 lint
+> concurrently npm:typecheck npm:lint:eslint
+
+[typecheck] 
+[typecheck] > miaoda-vite-react-app@0.1.0 typecheck
+[typecheck] > tsc -p tsconfig.app.json
+[typecheck] 
+[lint:eslint] 
+[lint:eslint] > miaoda-vite-react-app@0.1.0 lint:eslint
+[lint:eslint] > eslint src
+[lint:eslint] 
+[typecheck] npm run typecheck exited with code 0
+[lint:eslint] 
+[lint:eslint] C:\Users\31482\Doubao\chats\2026-09-26\new-chat\StructMind-Agent\src\hooks\use-action-player.ts
+[lint:eslint]   103:5  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive
+-deps')
+[lint:eslint] 
+[lint:eslint] C:\Users\31482\Doubao\chats\2026-09-26\new-chat\StructMind-Agent\src\pages\RuntimeVerify\RuntimeVerifyPag
+e.tsx
+[lint:eslint]   1018:5  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustiv
+e-deps')
+[lint:eslint] 
+[lint:eslint] ✖ 2 problems (0 errors, 2 warnings)
+[lint:eslint]   0 errors and 2 warnings potentially fixable with the `--fix` option.
+[lint:eslint] 
+[lint:eslint] npm run lint:eslint exited with code 0
+[main 323a9957] feat: 真实模式升级 — 校核回退闭环/崩溃透明降级/共享上下文 + tool_call args 修复 + 专项验证
+ 11 files changed, 11269 insertions(+), 11 deletions(-)
+ create mode 100644 DEPLOY_VERCEL.md
+ rename build.log => gh.log (88%)
+ create mode 100644 scripts/verify-agentic.ts
+ create mode 100644 scripts/verify-out/favicon.svg
+ create mode 100644 scripts/verify-out/icons.svg
+ create mode 100644 scripts/verify-out/verify-agentic.js
+ create mode 100644 scripts/verify-out/verify-entry.js
+ create mode 100644 scripts/vite-verify-agentic.config.ts

@@ -62,3 +62,6 @@ pnpm-lock.yaml
 
 # Agent files
 .agent/
+
+# 本地验证构建产物（勿入库）
+scripts/verify-out/
