@@ -1,4 +1,0 @@
-﻿rm 'scripts/verify-out/favicon.svg'
-rm 'scripts/verify-out/icons.svg'
-rm 'scripts/verify-out/verify-agentic.js'
-rm 'scripts/verify-out/verify-entry.js'
