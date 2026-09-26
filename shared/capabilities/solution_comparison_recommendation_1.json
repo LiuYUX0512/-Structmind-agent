@@ -1,0 +1,39 @@
+{
+  "id": "solution_comparison_recommendation_1",
+  "pluginKey": "@official-plugins/ai-text-generate",
+  "pluginVersion": "1.0.21",
+  "name": "方案对比推荐",
+  "description": "基于多个候选结构方案的指标数据，生成综合推荐方案及详细推荐理由，输出流式markdown文本",
+  "icon": "",
+  "paramsSchema": {
+    "type": "object",
+    "properties": {
+      "candidate_solutions": {
+        "type": "string",
+        "description": "多个候选结构方案的详细信息及各项指标数据"
+      },
+      "evaluation_factors": {
+        "type": "string",
+        "description": "方案评估的核心考量因素及权重优先级（可选）"
+      }
+    },
+    "required": [
+      "candidate_solutions"
+    ],
+    "order": [
+      "candidate_solutions",
+      "evaluation_factors"
+    ]
+  },
+  "formValue": {
+    "prompt": "你是一位资深的技术方案评估专家，拥有丰富的架构设计和方案选型经验。\n\n请基于以下提供的多个候选结构方案的指标数据，进行全面的对比分析，并生成综合推荐方案及详细的推荐理由。\n\n候选方案数据：\n{{input.candidate_solutions}}\n\n评估优先级参考：\n{{input.evaluation_factors}}\n\n输出要求：\n1. 整体采用markdown格式输出，结构清晰，层次分明\n2. 首先给出明确的综合推荐结论，直接说明推荐哪个方案\n3. 然后从以下几个维度进行详细分析：\n   - 各方案核心指标对比（以表格形式呈现关键指标对比）\n   - 推荐方案的优势分析（至少列出3个核心优势）\n   - 推荐方案的潜在不足及优化建议\n   - 其他方案的适用场景说明\n4. 最后给出落地实施建议\n5. 语言专业严谨，分析客观公正，理由充分详实\n6. 总字数控制在1500-2500字之间",
+    "modelID": "2015",
+    "modelParams": {
+      "maxTokens": 1000,
+      "temperature": 0.5
+    }
+  },
+  "createdAt": 1789712598010,
+  "updatedAt": 1790384670899,
+  "createdBy": 7578159910236474320
+}

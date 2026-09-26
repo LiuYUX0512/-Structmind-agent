@@ -1,0 +1,40 @@
+{
+  "id": "civil_struct_qa_1",
+  "pluginKey": "@official-plugins/ai-text-generate",
+  "pluginVersion": "1.0.21",
+  "name": "结构智能问答",
+  "description": "对话式回答用户关于结构方案的追问，基于土木工程专业知识提供专业解答，感知当前项目参数和方案上下文，输出流式markdown。",
+  "icon": "",
+  "paramsSchema": {
+    "properties": {
+      "project_context": {
+        "type": "string",
+        "description": "当前项目的参数、方案等上下文信息"
+      },
+      "user_question": {
+        "type": "string",
+        "description": "用户关于结构方案的问题"
+      }
+    },
+    "required": [
+      "user_question",
+      "project_context"
+    ],
+    "order": [
+      "project_context",
+      "user_question"
+    ],
+    "type": "object"
+  },
+  "formValue": {
+    "modelID": "2015",
+    "modelParams": {
+      "maxTokens": 1000,
+      "temperature": 0.5
+    },
+    "prompt": "你是一位资深的土木工程结构专业专家，拥有丰富的结构设计、方案论证、规范应用经验，精通各类结构体系、材料特性、荷载计算及工程实践知识。\n\n请结合以下项目上下文信息，专业、准确地回答用户的问题：\n\n项目上下文：\n{{input.project_context}}\n\n用户问题：\n{{input.user_question}}\n\n回答要求：\n1. 专业性：严格遵循土木工程相关规范、标准和行业最佳实践，确保内容准确可靠，如有不确定的内容请明确说明\n2. 针对性：紧密结合提供的项目上下文信息，回答贴合实际项目场景\n3. 结构清晰：采用markdown格式输出，合理使用标题、列表、加粗等格式增强可读性，复杂内容分点阐述\n4. 实用性：提供的建议或解决方案具备可操作性，必要时说明适用条件和注意事项\n5. 通俗易懂：在保证专业准确性的前提下，尽可能使用清晰易懂的表述，避免过于晦涩的术语堆砌，如使用专业术语可适当解释\n\n如果问题涉及多个方面，请分别说明；如果现有信息不足以给出确切答案，请明确指出需要补充的信息内容。"
+  },
+  "createdAt": 1789712598225,
+  "updatedAt": 1790384686802,
+  "createdBy": 7578159910236474320
+}
