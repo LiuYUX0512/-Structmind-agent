@@ -68,11 +68,11 @@ function StructureGrow() {
       <motion.g
         initial={{ filter: 'drop-shadow(0 0 0px rgba(45,212,191,0))' }}
         animate={{ filter: 'drop-shadow(0 0 14px rgba(45,212,191,0.85))' }}
-        transition={{ delay: 1.9, duration: 0.6, ease: 'easeOut' }}
+        transition={{ delay: 1.5, duration: 0.45, ease: 'easeOut' }}
       >
         <motion.g
           animate={{ filter: 'drop-shadow(0 0 2px rgba(45,212,191,0.35))' }}
-          transition={{ delay: 2.6, duration: 0.5 }}
+          transition={{ delay: 2.05, duration: 0.4 }}
         />
       </motion.g>
     </motion.svg>
