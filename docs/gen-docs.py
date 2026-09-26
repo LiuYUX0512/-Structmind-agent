@@ -256,6 +256,5 @@ def gen_cv_doc():
 
 
 if __name__ == "__main__":
-    gen_tech_doc()
     gen_cv_doc()
-    print("全部生成完毕。请打开 docs/ 目录查看两份 Word 文档。")
+    print("人机协同履历表已生成。技术说明文档请运行 gen_tech.py（国赛级排版，含封面/目录/插图/规范清单）。")
