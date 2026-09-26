@@ -850,6 +850,28 @@ async function scenarioUiHealth() {
   checks.push(['造价大屏数字（CountUp+font-mono+色块）', cmpSrc.includes('CountUpOnView') && cmpSrc.includes('text-[52px]') && cmpSrc.includes('border-primary/25'), 'big cost ok']);
   checks.push(['预算对比绿/红着色', cmpSrc.includes('低于预算') && cmpSrc.includes('超出预算'), 'budget color ok']);
 
+  // 11e. 视觉包装第 11-15 项：鼠标光晕 / 厚实按钮 / 加载生长 / 参数专家感 / 弥散投影
+  const mouseSrc = readFileSync(resolve(root, 'src', 'components', 'MouseGlow.tsx'), 'utf-8');
+  checks.push(['鼠标跟随光晕（径向渐变+screen混合+触屏降级）', mouseSrc.includes('radial-gradient') && mouseSrc.includes('mixBlendMode') && mouseSrc.includes('pointer: coarse'), 'mouse glow ok']);
+  const homeSrc = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'HomePage.tsx'), 'utf-8');
+  checks.push(['光晕已挂载', homeSrc.includes('<MouseGlow />'), 'mount ok']);
+
+  const themeCss3 = readFileSync(resolve(root, 'src', 'tailwind-theme.css'), 'utf-8');
+  checks.push(['厚实按钮（双层渐变+阴影底层+点击下沉）', themeCss3.includes('btn-thick') && themeCss3.includes('translateY(2px)'), 'thick btn ok']);
+  checks.push(['弥散投影规范（0 20px 40px -20px）', themeCss3.includes('0 20px 40px -20px rgba(15, 76, 129, 0.15)') && themeCss3.includes('shadow-diffuse'), 'diffuse ok']);
+
+  const loadSrc = readFileSync(resolve(root, 'src', 'components', 'LoadingScreen.tsx'), 'utf-8');
+  checks.push(['加载页结构生长动画（梁柱 pathLength 生长）', loadSrc.includes('StructureGrow') && loadSrc.includes('pathLength'), 'grow ok']);
+  checks.push(['正在调度虚拟工程部', loadSrc.includes('正在调度虚拟工程部'), 'dispatch line ok']);
+
+  const paramsSrc = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'sections', 'ParamsSection.tsx'), 'utf-8');
+  checks.push(['参数面板工程图标（楼层/跨度）', paramsSrc.includes('<Layers className="pointer-events-none absolute left-3') && paramsSrc.includes('MoveHorizontal'), 'param icons ok']);
+  checks.push(['参数 Slider 快捷调节', paramsSrc.includes('type="range"') && paramsSrc.includes('accent-primary'), 'slider ok']);
+  checks.push(['推荐值提示气泡', paramsSrc.includes('推荐 3-12') && paramsSrc.includes('推荐 6-12'), 'hint bubble ok']);
+  checks.push(['主 CTA 厚实按钮', paramsSrc.includes('btn-thick btn-thick-active'), 'cta thick ok']);
+  const heroSrc5 = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'sections', 'HeroSection.tsx'), 'utf-8');
+  checks.push(['Hero 3D 卡弥散投影', heroSrc5.includes('shadow-diffuse-lg'), 'hero diffuse ok']);
+
   let pass = 0;
   for (const [name, ok, detail] of checks) {
     console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);

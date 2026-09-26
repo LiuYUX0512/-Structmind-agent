@@ -2,6 +2,83 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Building2, Cpu, Layers, ShieldCheck, Zap } from 'lucide-react';
 
+/** 结构生长动画：梁柱从两端向中间生长连接，完成后整体发光一次 */
+function StructureGrow() {
+  const cols = [
+    { x: 60, y1: 170, y2: 66, delay: 0.1 },
+    { x: 105, y1: 170, y2: 38, delay: 0.3 },
+    { x: 150, y1: 170, y2: 66, delay: 0.2 },
+  ];
+  const beams = [
+    { x1: 42, x2: 84, y: 66, delay: 0.85 },
+    { x1: 84, x2: 126, y: 66, delay: 0.95 },
+    { x1: 126, x2: 168, y: 66, delay: 1.05 },
+    { x1: 42, x2: 84, y: 118, delay: 1.25 },
+    { x1: 84, x2: 126, y: 118, delay: 1.35 },
+    { x1: 126, x2: 168, y: 118, delay: 1.45 },
+  ];
+  return (
+    <motion.svg
+      width="210"
+      height="196"
+      viewBox="0 0 210 196"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="overflow-visible"
+    >
+      {/* 地面 */}
+      <motion.line
+        x1="24" y1="170" x2="186" y2="170"
+        stroke="#2DD4BF" strokeWidth="2" strokeLinecap="round"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+        transition={{ duration: 0.5, delay: 0 }}
+      />
+      {/* 柱子：从底部向上生长 */}
+      {cols.map((c, i) => (
+        <motion.line
+          key={`c${i}`}
+          x1={c.x} y1={c.y1} x2={c.x} y2={c.y2}
+          stroke="#2DD4BF" strokeWidth="2.5" strokeLinecap="round"
+          initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+          transition={{ duration: 0.5, delay: c.delay, ease: 'easeOut' }}
+        />
+      ))}
+      {/* 梁：左右半段各自生长，形成“两端向中间连接” */}
+      {beams.map((b, i) => (
+        <motion.line
+          key={`b${i}`}
+          x1={b.x1} y1={b.y} x2={b.x2} y2={b.y}
+          stroke="#5EEAD4" strokeWidth="2" strokeLinecap="round"
+          initial={{ pathLength: 0 }} animate={{ pathLength: 1 }}
+          transition={{ duration: 0.35, delay: b.delay, ease: 'easeInOut' }}
+        />
+      ))}
+      {/* 连接节点 */}
+      {cols.map((c, i) => (
+        <motion.circle
+          key={`n${i}`}
+          cx={c.x} cy={c.y2} r="3.2"
+          fill="#2DD4BF"
+          initial={{ scale: 0 }} animate={{ scale: 1 }}
+          transition={{ delay: c.delay + 0.5, type: 'spring', stiffness: 260, damping: 14 }}
+        />
+      ))}
+      {/* 完成时整体发光一次 */}
+      <motion.g
+        initial={{ filter: 'drop-shadow(0 0 0px rgba(45,212,191,0))' }}
+        animate={{ filter: 'drop-shadow(0 0 14px rgba(45,212,191,0.85))' }}
+        transition={{ delay: 1.9, duration: 0.6, ease: 'easeOut' }}
+      >
+        <motion.g
+          animate={{ filter: 'drop-shadow(0 0 2px rgba(45,212,191,0.35))' }}
+          transition={{ delay: 2.6, duration: 0.5 }}
+        />
+      </motion.g>
+    </motion.svg>
+  );
+}
+
 interface LoadingScreenProps {
   onComplete: () => void;
   minDuration?: number;
@@ -185,9 +262,9 @@ export default function LoadingScreen({ onComplete, minDuration = 1800 }: Loadin
             animate={{ scale: [1, 1.5, 1], opacity: [0.4, 0, 0.4] }}
             transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
           />
-          {/* Icon container */}
-          <div className="relative flex size-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 backdrop-blur-sm ring-1 ring-primary/40">
-            <Building2 className="size-10 text-primary" strokeWidth={1.5} />
+          {/* Icon container：结构梁柱生长动画 */}
+          <div className="relative flex size-40 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 backdrop-blur-sm ring-1 ring-primary/40">
+            <StructureGrow />
             {/* Corner decorations */}
             <div className="absolute -left-0.5 -top-0.5 h-3 w-3 border-l-2 border-t-2 border-primary" />
             <div className="absolute -right-0.5 -top-0.5 h-3 w-3 border-r-2 border-t-2 border-primary" />
@@ -223,6 +300,18 @@ export default function LoadingScreen({ onComplete, minDuration = 1800 }: Loadin
              <span className="h-1 w-1 rounded-full bg-primary/50" />
              <span>智能比选</span>
            </div>
+        </motion.div>
+
+        {/* 正在调度虚拟工程部... */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: [0.5, 1, 0.5] }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+          className="flex items-center gap-2 font-mono text-[11px] tracking-widest text-cyan-200/70"
+        >
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" />
+          正在调度虚拟工程部...
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" />
         </motion.div>
 
         {/* Progress bar */}

@@ -45,6 +45,7 @@ import {
   Home,
   GraduationCap,
   Factory,
+  MoveHorizontal,
   Zap,
   Lock,
   Unlock,
@@ -636,9 +637,10 @@ function ParamsSection({
                            </div>
                             <FormControl>
                               <div className="relative">
+                                <Layers className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary/70" />
                                 <Input
                                   type="number"
-                                  className="h-11 pr-10 font-mono text-base font-semibold tabular-nums"
+                                  className="h-11 pl-10 pr-10 font-mono text-base font-semibold tabular-nums"
                                   {...field}
                                   onChange={(e) => {
                                     field.onChange(e);
@@ -660,6 +662,32 @@ function ParamsSection({
                                 </span>
                               </div>
                             </FormControl>
+                            <div className="mt-1 flex items-center gap-2">
+                              <input
+                                type="range"
+                                min={1}
+                                max={60}
+                                step={1}
+                                value={field.value || 1}
+                                onChange={(e) => {
+                                  const f = Number(e.target.value);
+                                  field.onChange(f);
+                                  if (f > 0 && !form.getValues('buildingHeight')) {
+                                    form.setValue('buildingHeight', Math.round(f * 3 * 10) / 10);
+                                  } else if (f > 0) {
+                                    const currentHeight = form.getValues('buildingHeight');
+                                    const expected = Math.round(f * 3 * 10) / 10;
+                                    if (Math.abs(currentHeight - expected) < 0.15 || !currentHeight) {
+                                      form.setValue('buildingHeight', expected);
+                                    }
+                                  }
+                                }}
+                                className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-primary/20 accent-primary"
+                              />
+                              <span className="whitespace-nowrap rounded-sm border border-primary/25 bg-primary/5 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                                推荐 3-12
+                              </span>
+                            </div>
                             <FormMessage />
                           </FormItem>
                        )}
@@ -883,9 +911,10 @@ function ParamsSection({
                           </FormLabel>
                           <FormControl>
                             <div className="relative">
+                              <MoveHorizontal className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary/70" />
                               <Input
                                 type="number"
-                                className="h-11 pr-8 font-mono text-base font-semibold tabular-nums"
+                                className="h-11 pl-10 pr-8 font-mono text-base font-semibold tabular-nums"
                                 {...field}
                               />
                               <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -893,6 +922,20 @@ function ParamsSection({
                               </span>
                             </div>
                           </FormControl>
+                          <div className="mt-1 flex items-center gap-2">
+                            <input
+                              type="range"
+                              min={3}
+                              max={24}
+                              step={0.5}
+                              value={field.value || 6}
+                              onChange={(e) => field.onChange(Number(e.target.value))}
+                              className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-primary/20 accent-primary"
+                            />
+                            <span className="whitespace-nowrap rounded-sm border border-primary/25 bg-primary/5 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                              推荐 6-12
+                            </span>
+                          </div>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -1286,7 +1329,7 @@ function ParamsSection({
                           type="submit"
                           size="lg"
                           disabled={isGenerating || !weightsValid || disabled}
-                          className="h-12 min-w-[320px] gap-2 text-base font-semibold shadow-lg shadow-primary/30"
+                          className="btn-thick btn-thick-active h-12 min-w-[320px] gap-2 text-base font-semibold"
                         >
                           <Sparkles className="size-5" />
                           {isGenerating ? '方案生成中...' : disabled ? '播放中...' : '启动智能方案生成'}

@@ -288,7 +288,7 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.4, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-                className="corner-marks-full relative overflow-hidden border glass-blueprint p-2 shadow-xl shadow-primary/10"
+                className="corner-marks-full shadow-diffuse-lg relative overflow-hidden border glass-blueprint p-2"
                 style={{ borderRadius: '8px' }}
               >
                 <span className="corner-tl" />

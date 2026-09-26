@@ -13,6 +13,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import ReportPrintView from '@/components/ReportPrintView';
 import StepNav from '@/components/StepNav';
 import LoadingScreen from '@/components/LoadingScreen';
+import MouseGlow from '@/components/MouseGlow';
 import AgentConfigPanel from '@/components/AgentConfigPanel';
 import HeroSection from './sections/HeroSection';
 import ParamsSection from './sections/ParamsSection';
@@ -1364,10 +1365,9 @@ ${dis || '- （待补充）'}
   return (
     <>
       <AnimatePresence>
-        {isInitialLoading && (
-          <LoadingScreen onComplete={() => setIsInitialLoading(false)} />
-        )}
+        {isInitialLoading && <LoadingScreen onComplete={() => setIsInitialLoading(false)} />}
       </AnimatePresence>
+      <MouseGlow />
       <div className="app-shell min-h-screen bg-blueprint-fade text-foreground">
       {/* Global blueprint grid overlay */}
       <div className="pointer-events-none fixed inset-0 z-0 bg-blueprint-grid opacity-[0.4]" />

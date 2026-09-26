@@ -838,7 +838,7 @@ function ComparisonSection({
             className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-12"
           >
             {/* 左：总工分歧权衡 */}
-            <Card className="corner-marks border-border/60 bg-card/80 blueprint-card lg:col-span-7">
+            <Card className="corner-marks shadow-diffuse border-border/60 bg-card/80 blueprint-card lg:col-span-7">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base font-semibold">
                   <Gavel className="size-4 text-amber" strokeWidth={1.75} />
