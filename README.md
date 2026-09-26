@@ -107,3 +107,26 @@ import configData from "@shared/static/config.json";
 | 图表色 | `bg-chart-1` ~ `bg-chart-5` | `--chart-1` ~ `--chart-5` |
 
 HSL 格式使用**空格分隔**：`--primary: hsl(150 60% 40%);`
+
+---
+
+## 本地运行
+
+```bash
+# 1. 安装依赖（Node 20+）
+npm install
+
+# 2. 启动开发服务器
+npm run dev:local
+# 浏览器打开 http://localhost:5173
+
+# 3. 生产构建（本地验证用）
+npm run build:local
+```
+
+> 说明：
+> - `npm run dev` / `npm run build` 为妙搭平台专用命令（依赖 bash/rsync），仅用于平台部署；本地请使用 `dev:local` / `build:local`（跨平台，Windows/macOS/Linux 通用）。
+> - 首次在 Windows 上 `npm install` 后若构建报缺 `rolldown` / `lightningcss` / `tailwindcss oxide` 平台二进制，执行：
+>   `npm install @rolldown/binding-win32-x64-msvc lightningcss-win32-x64-msvc @tailwindcss/oxide-win32-x64-msvc`
+> - AI 插件能力（`capabilityClient`）依赖妙搭平台环境，本地运行时演示模式可正常工作，智能问答真实调用需配置平台插件。
+
