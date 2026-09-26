@@ -1,9 +1,9 @@
 ﻿[gh-pages] base=/-Structmind-agent/, out=dist/gh-pages
 node : [33m(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to be
 come the default in a future major version of Vite:
-所在位置 行:1 字符: 367
-+ ... lyContinue; node scripts\build-gh-pages.mjs *> build.log 2>&1; Write- ...
-+                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+所在位置 行:1 字符: 537
++ ... ld gh-pages:"; node scripts/build-gh-pages.mjs *> gh.log 2>&1; Write- ...
++                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     + CategoryInfo          : NotSpecified: ([33m(!) Your V...ersion of Vite::String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
@@ -20,13 +20,13 @@ et.
 [miaoda-polyfill] generated assets/polyfills.js (53KB)
 computing gzip size...
 dist/gh-pages/routes.json                              0.09 kB │ gzip:   0.07 kB
-dist/gh-pages/index.html                              11.40 kB │ gzip:   3.79 kB
+dist/gh-pages/index.html                              11.40 kB │ gzip:   3.80 kB
 dist/gh-pages/assets/polyfills.js                     54.50 kB
 dist/gh-pages/assets/index-D4VG6Rj7.css              318.44 kB │ gzip:  45.31 kB
 dist/gh-pages/assets/rolldown-runtime-B0Z9INg1.js      0.90 kB │ gzip:   0.51 kB
 dist/gh-pages/assets/radix-bZwHFQar.js               137.68 kB │ gzip:  43.30 kB │ map:    615.89 kB
 dist/gh-pages/assets/toolkit-WPzQOIzQ.js             737.71 kB │ gzip: 228.50 kB │ map:  3,655.91 kB
-dist/gh-pages/assets/index-Dn4WTd7L.js             2,241.14 kB │ gzip: 708.26 kB │ map: 10,610.40 kB
+dist/gh-pages/assets/index-BsxV1Ti1.js             2,243.50 kB │ gzip: 709.11 kB │ map: 10,621.48 kB
 
 [32m✓ built in 3.78s[39m
 [33m[plugin builtin:vite-reporter] 

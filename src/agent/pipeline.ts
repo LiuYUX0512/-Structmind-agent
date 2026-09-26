@@ -95,18 +95,24 @@ export class AgentPipeline {
     allPass: boolean;
   } | null = null;
 
+  // 跨阶段共享上下文（真实模式：校核反馈等中间结论累积传递，供回退闭环与 Chief 仲裁引用）
+  private sharedContext: string[] = [];
+
   private onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void;
+  private onDegrade?: (reason: string) => void;
 
   constructor(
     params: IProjectParams,
     weights?: IWeightConfig,
     config?: Partial<IEngineConfig>,
-    onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void
+    onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void,
+    onDegrade?: (reason: string) => void
   ) {
     this.params = params;
     this.weights = weights || MOCK_WEIGHT_CONFIG;
     this.config = config || {};
     this.onProgress = onProgress;
+    this.onDegrade = onDegrade;
   }
 
   /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
@@ -127,11 +133,66 @@ export class AgentPipeline {
       }
     }
 
+    try {
+      return await this.runCore();
+    } catch (e) {
+      // 保命机制：真实模式崩溃时自动降级到演示轨迹模式继续跑完（透明降级，不静默）
+      if (this.config.mode === 'real') {
+        const reason = (e as Error).message || '未知错误';
+        this.config = { ...this.config, mode: 'trace' };
+        this.resetState();
+        this.onDegrade?.(reason);
+        const result = await this.runCore();
+        this.finalResult = { ...result, degraded: { from: 'real', reason } };
+        return this.finalResult;
+      }
+      throw e;
+    }
+  }
+
+  /** 核心执行：四阶段 + 真实模式校核回退闭环 */
+  private async runCore(): Promise<IAgentPipelineResult> {
     // 按顺序执行四个子 Agent，每完成一个阶段即回调进度（真实模式逐步展示思考过程）
     await this.runArchitect();
     this.emitProgress(1);
     await this.runCode();
     this.emitProgress(2);
+
+    // ===== 真实模式校核回退闭环（对齐演示模式"Code 挑刺 → 重出 → 复核"能力）=====
+    // Code 发现规范违规 → 反馈写回共享上下文 → Architect 带着反馈重出方案 → 重新校核
+    // 最多回退 2 轮控制成本；全部通过后 Chief 在"校核状态已确认"的前提下仲裁
+    if (this.config.mode === 'real' && this.config.allowRecheck !== false) {
+      const MAX_LOOPS = 2;
+      for (let loop = 1; loop <= MAX_LOOPS; loop++) {
+        const violations = this.collectViolations();
+        if (violations.length === 0) break;
+        const feedback = violations
+          .map((v) => `【校核未通过】${v.schemeName}（${v.schemeId}）：${v.summary}`)
+          .join('\n');
+        this.sharedContext.push(`第 ${loop} 轮校核反馈：\n${feedback}`);
+        this.correctionMeta = {
+          loops: loop,
+          replacements: violations.map((v) => ({
+            original: v.schemeId,
+            replacement: '',
+            reason: v.summary,
+            loop,
+            finalStatus: 'rechecking',
+          })),
+          allPass: false,
+        };
+        // 打回方案创作工程师重出（携带校核反馈）
+        await this.runArchitect(feedback);
+        this.emitProgress(1);
+        await this.runCode();
+        this.emitProgress(2);
+      }
+      const finalViolations = this.collectViolations();
+      if (finalViolations.length === 0 && this.correctionMeta) {
+        this.correctionMeta.allPass = true;
+      }
+    }
+
     await this.runEconomist();
     this.emitProgress(3);
     await this.runChief();
@@ -143,15 +204,53 @@ export class AgentPipeline {
     return this.finalResult;
   }
 
-  /** 第一步：方案创作工程师 */
-  private async runArchitect(): Promise<void> {
+  /** 收集未通过规范校核的候选方案（真实模式回退闭环的违规判定） */
+  private collectViolations(): Array<{ schemeId: string; schemeName: string; summary: string }> {
+    const out: Array<{ schemeId: string; schemeName: string; summary: string }> = [];
+    for (const scheme of this.candidateSchemes) {
+      const check = this.codeChecks[scheme.id] as
+        | { seismic?: { failCount?: number; summary?: string }; fire?: { failCount?: number; summary?: string } }
+        | undefined;
+      const parts: string[] = [];
+      if (check?.seismic && (check.seismic.failCount ?? 0) > 0) {
+        parts.push(`抗震校核未通过：${check.seismic.summary || '存在强条不满足'}`);
+      }
+      if (check?.fire && (check.fire.failCount ?? 0) > 0) {
+        parts.push(`防火校核未通过：${check.fire.summary || '存在强条不满足'}`);
+      }
+      if (parts.length > 0) {
+        out.push({ schemeId: scheme.id, schemeName: scheme.name, summary: parts.join('；') });
+      }
+    }
+    return out;
+  }
+
+  /** 重置中间状态（崩溃降级重跑前调用） */
+  private resetState(): void {
+    this.candidateSchemes = [];
+    this.codeChecks = {};
+    this.metrics = {};
+    this.finalResult = null;
+    this.actionLog = [];
+    this.conclusions = [];
+    this.correctionMeta = null;
+  }
+
+  /** 第一步：方案创作工程师（feedback 非空 = 校核回退闭环打回重出） */
+  private async runArchitect(feedback?: string): Promise<void> {
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
       // 真实模式
       const engine = new RealEngine(this.params, this.weights, this.config);
-      const prompt = buildAgentPrompt('architect', this.params) +
+      let prompt = buildAgentPrompt('architect', this.params) +
         '\n\n请调用 query_structure_systems 工具筛选出最适合本项目的 3 个候选结构方案，并给出简要的适用性评述。';
+      if (feedback) {
+        prompt +=
+          '\n\n## ⚠️ 上一轮规范校核反馈（必须认真对待）\n' +
+          feedback +
+          '\n\n请重新选型：优先选择能通过上述规范校核的候选方案；若某方案确实难以满足，请替换为更合适的结构体系。';
+      }
       const result = await engine.run(prompt, 'architect');
 
       // 解析候选方案（从日志中找 query_structure_systems 的调用结果）
@@ -338,9 +437,17 @@ export class AgentPipeline {
 
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
+      // 校核状态注入：Chief 仲裁时把规范校核结果作为关键决策因子（对齐演示模式"总工把关"）
+      const violationsNow = this.collectViolations();
+      const checkStatus = violationsNow.length > 0
+        ? `\n\n## ⚠️ 校核状态（重要，仲裁必读）\n仍存在未通过规范校核的方案：${violationsNow
+            .map((v) => `${v.schemeName}（${v.schemeId}）：${v.summary}`)
+            .join('；')}。请在比选评分中如实反映该风险，并在风险提示中注明"该方案需人工复核后方可深化"。`
+        : '\n\n## ✅ 校核状态\n所有候选方案均已通过（或经迭代修正通过）抗震与防火规范校核。';
       const prompt = buildAgentPrompt('chief', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         `\n权重配置：${JSON.stringify(this.weights)}\n` +
+        checkStatus +
         '\n请调用 compare_schemes 工具进行综合对比评分，调用时必须传入 weights 参数（与上述权重配置一致），然后给出最终结论。' +
         '\n\n**输出结构必须包含以下章节（按顺序）：**' +
         '\n1. 综合推荐方案及排序（含综合得分）' +
@@ -434,8 +541,9 @@ export async function runAgentPipeline(
   params: IProjectParams,
   weights?: IWeightConfig,
   config?: Partial<IEngineConfig>,
-  onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void
+  onProgress?: (actionLog: IAgentPipelineResult['actionLog'], agentIndex: number) => void,
+  onDegrade?: (reason: string) => void
 ): Promise<IAgentPipelineResult> {
-  const pipeline = new AgentPipeline(params, weights, config, onProgress);
+  const pipeline = new AgentPipeline(params, weights, config, onProgress, onDegrade);
   return pipeline.run();
 }

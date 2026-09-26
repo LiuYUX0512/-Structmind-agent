@@ -237,6 +237,12 @@ export class RealEngine {
 
     try {
       args = JSON.parse(argsStr);
+      // 回写已记录的 tool_call 日志 args（此前恒为空 {}，导致 pipeline 无法按
+      // args.systemId 精确配对校核结果，真实模式 codeChecks 长期为 null）
+      const lastLog = this.actionLog[this.actionLog.length - 1];
+      if (lastLog && lastLog.type === 'tool_call' && lastLog.toolCallId === toolCallId) {
+        lastLog.args = args;
+      }
     } catch {
       const errMsg = '参数解析失败，不是合法 JSON';
       this.pushLog({

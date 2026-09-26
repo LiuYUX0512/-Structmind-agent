@@ -224,6 +224,8 @@ export interface IAgentPipelineResult {
   };
   actionLog: IAgentActionLog[];
   conclusions: string[];
+  /** 降级标记：真实模式崩溃后自动切换演示轨迹继续跑完时写入（透明降级） */
+  degraded?: { from: 'real' | 'trace'; reason: string };
 }
 
 /** 推理引擎配置 */
@@ -235,6 +237,8 @@ export interface IEngineConfig {
   maxSteps: number;
   /** 真实模式的 system prompt 前缀 */
   systemPrompt?: string;
+  /** 真实模式校核回退闭环开关（默认开启：Code 发现违规 → Architect 重出 → 复核） */
+  allowRecheck?: boolean;
 }
 
 /** 对话意图类型 */
