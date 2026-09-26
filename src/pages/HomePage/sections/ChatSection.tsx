@@ -24,6 +24,28 @@ import {
   type IStructureScheme,
 } from '@/data/structure';
 import type { IIntentResult } from '@/agent/types';
+import { useTypewriter } from '@/hooks/use-typewriter';
+
+/** 思考气泡轮播文案（AI 决策过程表演） */
+const THINKING_STEPS = [
+  '正在理解问题并拆解意图',
+  '正在查阅 GB 55002 抗震规范...',
+  '正在校核结构参数与方案约束...',
+  '正在组织专业回答',
+];
+
+/** 最新一条回答的行级打字机（Markdown 安全） */
+function TypedAssistantMessage({ content }: { content: string }) {
+  const { displayText, done } = useTypewriter(content, { lineDelay: 90 });
+  return (
+    <div className="prose prose-sm max-w-none text-[13px] leading-relaxed dark:prose-invert">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>
+      {!done && (
+        <span className="ml-0.5 inline-block h-3.5 w-[2px] animate-pulse bg-teal/70 align-middle" />
+      )}
+    </div>
+  );
+}
 
 interface ChatSectionProps {
   messages: IChatMessage[];
@@ -59,6 +81,7 @@ function ChatSection({
   onOpenConfig,
 }: ChatSectionProps) {
   const [inputValue, setInputValue] = useState('');
+  const [thinkIdx, setThinkIdx] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMessages = messages.length > 0;
 
@@ -67,6 +90,16 @@ function ChatSection({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages.length, isLoading]);
+
+  // 思考气泡文案轮播
+  useEffect(() => {
+    if (!isLoading) {
+      setThinkIdx(0);
+      return;
+    }
+    const t = setInterval(() => setThinkIdx((i) => (i + 1) % THINKING_STEPS.length), 1600);
+    return () => clearInterval(t);
+  }, [isLoading]);
 
   const submitMessage = () => {
     if (!inputValue.trim() || isLoading) return;
@@ -216,7 +249,7 @@ function ChatSection({
               <ScrollArea ref={scrollRef} className="flex-1 px-4">
                 <div className="space-y-4 pb-4 pr-2">
                   {hasMessages ? (
-                    messages.map((msg) => (
+                    messages.map((msg, idx) => (
                     <div
                       key={msg.id}
                       className={`flex gap-3 ${
@@ -245,11 +278,15 @@ function ChatSection({
                         }`}
                       >
                         {msg.role === 'assistant' ? (
-                          <div className="prose prose-sm max-w-none text-[13px] leading-relaxed dark:prose-invert">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {msg.content}
-                            </ReactMarkdown>
-                          </div>
+                          idx === messages.length - 1 && !isLoading ? (
+                            <TypedAssistantMessage content={msg.content} />
+                          ) : (
+                            <div className="prose prose-sm max-w-none text-[13px] leading-relaxed dark:prose-invert">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          )
                         ) : (
                           <p>{msg.content}</p>
                         )}
@@ -275,9 +312,13 @@ function ChatSection({
                       >
                         <Bot className="size-4" strokeWidth={1.75} />
                       </div>
-                      <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin text-teal" />
-                        <span>智能体思考中...</span>
+                      <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-background/60 px-4 py-3 text-sm text-muted-foreground">
+                        <div className="flex gap-1">
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal [animation-delay:-0.3s]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal [animation-delay:-0.15s]" />
+                          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-teal" />
+                        </div>
+                        <span>{THINKING_STEPS[thinkIdx]}</span>
                       </div>
                     </div>
                   )}

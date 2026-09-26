@@ -538,6 +538,29 @@
   }
 }
 
+/* ===== AgentFlowMap 执行图动画（SVG 节点树） ===== */
+@keyframes agent-flow-dash {
+  to { stroke-dashoffset: -24; }
+}
+@keyframes agent-flow-rework-blink {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+@keyframes agent-flow-active-pulse {
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(45, 212, 191, 0.4)); }
+  50% { filter: drop-shadow(0 0 12px rgba(45, 212, 191, 0.85)); }
+}
+.agent-flow-link-active {
+  stroke-dasharray: 6 6;
+  animation: agent-flow-dash 0.9s linear infinite;
+}
+.agent-flow-rework {
+  animation: agent-flow-rework-blink 0.6s ease-in-out infinite;
+}
+.agent-flow-active {
+  animation: agent-flow-active-pulse 1.2s ease-in-out infinite;
+}
+
 /* ===== Hero 3D 待机：顶层柱高亮（自转改由组件内 JS 真 3D 旋转驱动，绕竖直轴，保持等轴测观感） ===== */
 @utility hero-top-column {
   stroke: rgba(34, 211, 238, 0);

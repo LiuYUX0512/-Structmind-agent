@@ -20,9 +20,12 @@ import {
   X,
   Layers,
   Loader2,
+  Network,
+  List,
 } from 'lucide-react';
 import type { IAgentActionLog, AgentType } from '@/agent/types';
 import { SUB_AGENT_SPECS } from '@/agent/types';
+import AgentFlowMap from '@/components/AgentFlowMap';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -70,6 +73,7 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
     const scrollRef = useRef<HTMLDivElement>(null);
     const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
     const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
+    const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
 
     // 暴露给父组件的方法
     useImperativeHandle(ref, () => ({
@@ -328,8 +332,64 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
     // 播放中是否显示思考光标（think 打字机尾部闪烁）
     const showTypingCursor = isPlaying && playingLog?.type === 'think' && typingText.length > 0;
 
+    // 视图切换按钮
+    const viewToggle = (
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-md border border-border/40 bg-background/50 p-0.5">
+          <button
+            type="button"
+            onClick={() => setViewMode('map')}
+            className={`inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-medium transition-colors ${
+              viewMode === 'map'
+                ? 'bg-teal/15 text-teal'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Network className="size-3" />
+            思维导图
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-medium transition-colors ${
+              viewMode === 'list'
+                ? 'bg-teal/15 text-teal'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <List className="size-3" />
+            明细
+          </button>
+        </div>
+        {viewMode === 'map' && (
+          <span className="font-mono text-[9px] text-muted-foreground/60">
+            CODE → ARCHITECT 打回会显示红色弧线
+          </span>
+        )}
+      </div>
+    );
+
+    if (viewMode === 'map') {
+      return (
+        <div className="flex h-full flex-col">
+          {viewToggle}
+          <div
+            className="pres-flow-map w-full flex-1 overflow-y-auto pr-1"
+            style={{ maxHeight: '520px' }}
+          >
+            <AgentFlowMap
+              logs={logs}
+              playingStep={isPlaying ? playingLog?.step ?? null : null}
+              isPlaying={isPlaying}
+            />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="flex h-full flex-col">
+        {viewToggle}
         {/* 过滤状态条 */}
         <AnimatePresence>
           {filterAgent && (
@@ -635,7 +695,7 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
                             <span className="h-1 w-1 animate-bounce rounded-full bg-primary/50 [animation-delay:-0.15s]" />
                             <span className="h-1 w-1 animate-bounce rounded-full bg-primary/50" />
                           </div>
-                          <span className="text-[10px] text-muted-foreground">正在执行计算...</span>
+                          <span className="text-[10px] text-muted-foreground">{describeToolCall(playingLog.tool)}</span>
                         </div>
                       </>
                     )}
@@ -727,6 +787,23 @@ function analyzeResultStatus(result: unknown): {
   }
 
   return { status: 'neutral', statusColor: '' };
+}
+
+/** 工具调用的可读描述（思考气泡文案） */
+function describeToolCall(tool?: string): string {
+  if (!tool) return '正在调用工具...';
+  const map: Record<string, string> = {
+    check_seismic_requirements: '正在查阅 GB 55002 抗震规范...',
+    check_fire_requirements: '正在查阅 GB 55037 防火规范...',
+    estimate_cost: '正在测算工程成本...',
+    estimate_carbon: '正在估算建材生产与运输碳排放...',
+    check_foundation: '正在评估地基基础方案...',
+    check_frame: '正在校核框架结构选型...',
+    check_wind: '正在核算风荷载作用...',
+  };
+  if (map[tool]) return map[tool];
+  const pretty = tool.replace('check_', '').replaceAll('_', ' ');
+  return `正在执行 ${pretty}...`;
 }
 
 export default memo(AgentActionTimeline);

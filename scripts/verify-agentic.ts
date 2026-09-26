@@ -20,6 +20,7 @@ import { renderToString } from 'react-dom/server';
 import CountUpOnView from '../src/components/CountUpOnView';
 import StructureWireframe3D from '../src/components/StructureWireframe3D';
 import HeroSection from '../src/pages/HomePage/sections/HeroSection';
+import AgentFlowMap from '../src/components/AgentFlowMap';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import * as React from 'react';
@@ -802,6 +803,40 @@ async function scenarioUiHealth() {
   checks.push(['3D 自转走 JS 真 3D（36°/s）', wireSrc.includes('autoRotate ? 36 : 5'), 'js rotate ok']);
   checks.push(['3D hover 暂停事件', wireSrc.includes('onMouseEnter') && wireSrc.includes('onMouseLeave'), 'hover pause ok']);
   checks.push(['3D rAF 循环有清理', wireSrc.includes('cancelAnimationFrame'), 'raf cleanup ok']);
+
+  // 11c. 执行图节点树 + 打字机 + 思考气泡
+  const logs11 = [];
+  for (let i = 0; i < 8; i++) {
+    logs11.push({ step: i + 1, agent: (i % 4 === 0 ? 'architect' : i % 4 === 1 ? 'code' : i % 4 === 2 ? 'economist' : 'chief'), type: 'think', content: 'step ' + (i + 1) });
+  }
+  const flowHtml = renderToString(React.createElement(AgentFlowMap, { logs: logs11 as unknown as IAgentActionLog[], playingStep: 3, isPlaying: true }));
+  checks.push(['执行图 SSR 不崩', flowHtml.includes('MULTI-AGENT') && flowHtml.includes('svg'), 'flow ok']);
+  checks.push(['执行图含四泳道列头', ['方案建筑师', '规范校核员', '经济测算师', '总工仲裁'].every((k) => flowHtml.includes(k)), 'lanes ok']);
+  checks.push(['执行图含 SMIL 放电动画', flowHtml.includes('<animate'), 'smil ok']);
+
+  const rwLogs = [
+    { step: 1, agent: 'architect', type: 'think', content: 'a' },
+    { step: 2, agent: 'architect', type: 'conclusion', content: '方案一' },
+    { step: 3, agent: 'code', type: 'tool_call', tool: 'check_seismic_requirements' },
+    { step: 4, agent: 'code', type: 'tool_result', content: 'fail' },
+    { step: 5, agent: 'architect', type: 'think', content: '重新选型' },
+  ] as unknown as IAgentActionLog[];
+  const rwHtml = renderToString(React.createElement(AgentFlowMap, { logs: rwLogs }));
+  checks.push(['回退检测：code→architect 红色弧线', rwHtml.includes('agent-flow-rework') && rwHtml.includes('打回重算'), 'rework ok']);
+
+  const tl2 = readFileSync(resolve(root, 'src', 'components', 'AgentActionTimeline.tsx'), 'utf-8');
+  checks.push(['时间线含思维导图/明细切换', tl2.includes('思维导图') && tl2.includes("'list'") && tl2.includes('AgentFlowMap'), 'toggle ok']);
+  checks.push(['工具气泡可读描述（GB 55002）', tl2.includes('正在查阅 GB 55002 抗震规范'), 'tool desc ok']);
+
+  const chatSrc = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'sections', 'ChatSection.tsx'), 'utf-8');
+  checks.push(['对话区打字机（行级推进）', chatSrc.includes('useTypewriter') && chatSrc.includes('TypedAssistantMessage'), 'tw ok']);
+  checks.push(['思考气泡轮播 + 跳动点', chatSrc.includes('THINKING_STEPS') && chatSrc.includes('animate-bounce'), 'thinking ok']);
+
+  const twSrc = readFileSync(resolve(root, 'src', 'hooks', 'use-typewriter.ts'), 'utf-8');
+  checks.push(['useTypewriter 无 lint 残留', !twSrc.includes('eslint-disable'), 'tw lint ok']);
+
+  const themeCss2 = readFileSync(resolve(root, 'src', 'tailwind-theme.css'), 'utf-8');
+  checks.push(['执行图动画 CSS（流动/回退/呼吸）', themeCss2.includes('agent-flow-dash') && themeCss2.includes('agent-flow-rework-blink') && themeCss2.includes('agent-flow-active-pulse'), 'flow css ok']);
 
   let pass = 0;
   for (const [name, ok, detail] of checks) {
