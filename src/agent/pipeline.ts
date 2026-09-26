@@ -42,7 +42,7 @@ function extractAdviceFromMarkdown(md: string): IAgentPipelineResult['advice'] {
   // 按小节标题提取正文（支持 "## 3. 推荐理由" / "**推荐理由**" 等常见形态）
   const section = (title: string): string => {
     const esc = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?:#{1,6}\s*)?[\d.]*\s*${esc}[^\n]*\n([\s\S]*?)(?=\n\s*(?:#{1,6}|$))`, 'i');
+    const re = new RegExp(`(?:#{1,6}\\s*)?[\\d.]*\\s*${esc}[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{1,6}|$)|$)`, 'i');
     const m = md.match(re);
     return m ? m[1].trim() : '';
   };
@@ -187,7 +187,7 @@ export class AgentPipeline {
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
       const prompt = buildAgentPrompt('code', this.params) +
-        `\n\n候选方案：${this.candidateSchemes.map((s) => s.name).join('、')}\n` +
+        `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 check_seismic_requirements 和 check_fire_requirements 工具进行规范校核，给出逐条判定和条文依据。';
       const result = await engine.run(prompt, 'code');
 
@@ -275,7 +275,7 @@ export class AgentPipeline {
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
       const prompt = buildAgentPrompt('economist', this.params) +
-        `\n\n候选方案：${this.candidateSchemes.map((s) => s.name).join('、')}\n` +
+        `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 estimate_cost、estimate_schedule、estimate_precast_rate、estimate_carbon、assess_construction_risk 工具进行经济与绿色指标评估。';
       const result = await engine.run(prompt, 'economist');
 
@@ -335,9 +335,9 @@ export class AgentPipeline {
     if (useReal) {
       const engine = new RealEngine(this.params, this.weights, this.config);
       const prompt = buildAgentPrompt('chief', this.params) +
-        `\n\n候选方案：${this.candidateSchemes.map((s) => s.name).join('、')}\n` +
+        `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         `\n权重配置：${JSON.stringify(this.weights)}\n` +
-        '\n请调用 compare_schemes 工具进行综合对比评分，然后给出最终结论。' +
+        '\n请调用 compare_schemes 工具进行综合对比评分，调用时必须传入 weights 参数（与上述权重配置一致），然后给出最终结论。' +
         '\n\n**输出结构必须包含以下章节（按顺序）：**' +
         '\n1. 综合推荐方案及排序（含综合得分）' +
         '\n2. 推荐理由（至少3条核心理由）' +
@@ -358,10 +358,13 @@ export class AgentPipeline {
       const compareLog = engine.getActionLog().find(
         (log) => log.tool === 'compare_schemes' && log.type === 'tool_result'
       );
-      const compareResult = compareLog?.result as {
-        recommended: { schemeId: string; schemeName: string; overallScore: number };
-        ranking: Array<{ schemeId: string; schemeName: string; score: number; breakdown: Record<string, number> }>;
-      } | undefined;
+      const compareResult = compareLog?.result as
+        | {
+            recommended?: { schemeId?: string; schemeName?: string; overallScore?: number };
+            ranking?: Array<{ schemeId: string; schemeName: string; score: number; breakdown: Record<string, number> }>;
+          }
+        | { error?: string }
+        | undefined;
 
       this.actionLog.push(...result.actionLog);
       if (result.finalAnswer) {
@@ -371,12 +374,12 @@ export class AgentPipeline {
       this.finalResult = {
         schemes: this.candidateSchemes,
         recommended: {
-          schemeId: compareResult?.recommended.schemeId || schemeIds[0],
-          schemeName: compareResult?.recommended.schemeName || this.candidateSchemes[0]?.name || '',
-          overallScore: compareResult?.recommended.overallScore || 0,
+          schemeId: (compareResult as any)?.recommended?.schemeId || schemeIds[0],
+          schemeName: (compareResult as any)?.recommended?.schemeName || this.candidateSchemes[0]?.name || '',
+          overallScore: (compareResult as any)?.recommended?.overallScore || 0,
           reason: result.finalAnswer || '',
         },
-        ranking: compareResult?.ranking || [],
+        ranking: (compareResult as any)?.ranking || [],
         codeChecks: this.codeChecks,
         metrics: this.metrics,
         advice: extractAdviceFromMarkdown(result.finalAnswer || ''),

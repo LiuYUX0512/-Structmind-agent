@@ -111,6 +111,7 @@ export class RealEngine {
   private actionLog: IAgentActionLog[] = [];
   private stepCounter = 0;
   private messages: ILLMMessage[] = [];
+  private agentLabel: IAgentActionLog['agent'] = 'architect';
 
   constructor(params: IProjectParams, weights: IWeightConfig, config?: Partial<IEngineConfig>) {
     const savedConfig = loadEngineConfig();
@@ -221,6 +222,7 @@ export class RealEngine {
     // 无论参数解析是否成功，都先记录 tool_call 日志，保证 tool_call/tool_result 严格 1:1 可配对
     this.pushLog({
       type: 'tool_call',
+      agent: this.agentLabel,
       content: `调用工具：${name}`,
       tool: name,
       args,
@@ -233,6 +235,7 @@ export class RealEngine {
       const errMsg = '参数解析失败，不是合法 JSON';
       this.pushLog({
         type: 'tool_result',
+        agent: this.agentLabel,
         content: `工具 ${name} 执行失败：${errMsg}`,
         tool: name,
         result: { error: errMsg },
@@ -251,6 +254,7 @@ export class RealEngine {
 
       this.pushLog({
         type: 'tool_result',
+        agent: this.agentLabel,
         content: `工具 ${name} 执行完成`,
         tool: name,
         result: result as unknown,
@@ -268,6 +272,7 @@ export class RealEngine {
       const errMsg = String(e);
       this.pushLog({
         type: 'tool_result',
+        agent: this.agentLabel,
         content: `工具 ${name} 执行失败：${errMsg}`,
         tool: name,
         result: { error: errMsg },
@@ -289,6 +294,7 @@ export class RealEngine {
     finalAnswer: string;
     actionLog: IAgentActionLog[];
   }> {
+    this.agentLabel = agentLabel as IAgentActionLog['agent'];
     // 初始化 messages
     this.messages = [
       {
