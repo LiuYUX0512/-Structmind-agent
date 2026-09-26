@@ -1015,7 +1015,6 @@ export default function RuntimeVerifyPage() {
 
   useEffect(() => {
     void runTests();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const currentResult = results[Number(activeTab)];

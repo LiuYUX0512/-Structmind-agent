@@ -100,7 +100,6 @@ export function useActionPlayer({
         finished: true,
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, fullLogs.length]);
 
   // 清理定时器

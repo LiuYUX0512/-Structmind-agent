@@ -16,6 +16,13 @@ import { parseIntentByRules } from '../src/agent/intent';
 import { EIntentType } from '../src/agent/types';
 import { estimateCarbonBreakdown } from '../src/data/carbon-model';
 import { buildModelDefinition, serializeModelJson, serializeModelText, buildImportGuide } from '../src/lib/model-export';
+import { renderToString } from 'react-dom/server';
+import CountUpOnView from '../src/components/CountUpOnView';
+import StructureWireframe3D from '../src/components/StructureWireframe3D';
+import HeroSection from '../src/pages/HomePage/sections/HeroSection';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import * as React from 'react';
 import { extractDebateItems } from '../src/components/DebatePanel';
 
 // ---------- Mock LLM 工具 ----------
@@ -741,6 +748,69 @@ async function scenarioModelExport() {
   return { ok: pass === checks.length, pass, total: checks.length };
 }
 
+
+// ---------- 场景 11：UI 体检（视觉锤升级全量回归） ----------
+async function scenarioUiHealth() {
+  const checks: Array<[string, boolean, string]> = [];
+  const root = process.cwd();
+
+  // 11a. 渲染级：组件 SSR 不崩
+  const cup = renderToString(React.createElement(CountUpOnView, { value: 4, suffix: '+' }));
+  checks.push(['CountUpOnView SSR 不崩且输出初始值', cup.includes('0') || cup.includes('4'), cup.slice(0, 30)]);
+
+  const params3d: IProjectParams = { buildingType: 'factory', floors: 5, area: 5000, structurePreference: 'any', seismicIntensity: '8', soilCategory: 'II', geologyType: '粉质黏土', mainSpan: 12, budget: 2800, windPressure: '0.45', snowPressure: '0.35', fortificationCategory: '标准设防' };
+  const scheme3d = STRUCTURE_SYSTEM_LIBRARY.find((x) => x.id === 'frame') || STRUCTURE_SYSTEM_LIBRARY[0];
+  const html3d = renderToString(React.createElement(StructureWireframe3D, { params: params3d, scheme: scheme3d, autoRotate: true }));
+  checks.push(['3D autoRotate SSR 不崩', html3d.length > 200, `len=${html3d.length}`]);
+  checks.push(['autoRotate 渲染顶层柱高亮段', html3d.includes('hero-top-column'), 'topcol ok']);
+
+  const html3dStatic = renderToString(React.createElement(StructureWireframe3D, { params: params3d, scheme: scheme3d }));
+  checks.push(['非 autoRotate 不输出顶层柱高亮段', !html3dStatic.includes('hero-top-column'), 'static clean']);
+
+  const heroHtml = renderToString(
+    React.createElement(HeroSection, { onStart: () => undefined, params: params3d, scheme: scheme3d })
+  );
+  checks.push(['HeroSection SSR 不崩', heroHtml.length > 2000, `len=${heroHtml.length}`]);
+  checks.push(['Hero 统计带含 4 项数字标签', ['多智能体协同', '维度比选', '结构体系库', '方案并行比选'].every((k) => heroHtml.includes(k)), 'stats ok']);
+
+  // 11b. 源码级：视觉类与颜色映射存在
+  const themeCss = readFileSync(resolve(root, 'src', 'tailwind-theme.css'), 'utf-8');
+  checks.push(['主题含 emerald/gold 色板变量', themeCss.includes('--emerald') && themeCss.includes('--gold'), 'vars ok']);
+  checks.push(['主题含玻璃拟态 @utility', themeCss.includes('glass-blueprint'), 'glass ok']);
+  checks.push(['主题含呼吸网格 @utility+keyframes', themeCss.includes('hero-breathing') && themeCss.includes('hero-breathe'), 'breathe ok']);
+  checks.push(['主题含顶层柱高亮 @utility', themeCss.includes('hero-top-column'), 'topcol css ok']);
+
+  const heroSrc = readFileSync(resolve(root, 'src', 'pages', 'HomePage', 'sections', 'HeroSection.tsx'), 'utf-8');
+  checks.push(['Hero 传入 autoRotate', heroSrc.includes('autoRotate'), 'autoRotate prop ok']);
+  checks.push(['Hero 使用玻璃拟态类', heroSrc.includes('glass-blueprint'), 'glass use ok']);
+  checks.push(['Hero 使用 CountUpOnView', heroSrc.includes('CountUpOnView'), 'countup use ok']);
+
+  const tlSrc = readFileSync(resolve(root, 'src', 'components', 'AgentActionTimeline.tsx'), 'utf-8');
+  checks.push(['时间线四色映射（青/琥珀/绿/金）', tlSrc.includes('text-teal') && tlSrc.includes('text-amber') && tlSrc.includes('text-emerald') && tlSrc.includes('text-gold'), '4-color map ok']);
+
+  const pvSrc = readFileSync(resolve(root, 'src', 'components', 'AgentPipelineView.tsx'), 'utf-8');
+  checks.push(['四卡主题色同步（emerald/gold）', pvSrc.includes('emerald') && pvSrc.includes('gold'), 'pipeline theme ok']);
+
+  const cupSrc = readFileSync(resolve(root, 'src', 'components', 'CountUpOnView.tsx'), 'utf-8');
+  checks.push(['CountUp 无 IO 环境降级保护', cupSrc.includes('typeof IntersectionObserver') && cupSrc.includes('setDisplay(value)'), 'deg ok']);
+
+  const hook1 = readFileSync(resolve(root, 'src', 'hooks', 'use-action-player.ts'), 'utf-8');
+  const hook2 = readFileSync(resolve(root, 'src', 'pages', 'RuntimeVerify', 'RuntimeVerifyPage.tsx'), 'utf-8');
+  checks.push(['lint 清理：无 unused eslint-disable 残留', !hook1.includes('eslint-disable-next-line react-hooks/exhaustive-deps') && !hook2.includes('eslint-disable-next-line react-hooks/exhaustive-deps'), 'lint clean']);
+
+  const wireSrc = readFileSync(resolve(root, 'src', 'components', 'StructureWireframe3D.tsx'), 'utf-8');
+  checks.push(['3D 自转走 JS 真 3D（36°/s）', wireSrc.includes('autoRotate ? 36 : 5'), 'js rotate ok']);
+  checks.push(['3D hover 暂停事件', wireSrc.includes('onMouseEnter') && wireSrc.includes('onMouseLeave'), 'hover pause ok']);
+  checks.push(['3D rAF 循环有清理', wireSrc.includes('cancelAnimationFrame'), 'raf cleanup ok']);
+
+  let pass = 0;
+  for (const [name, ok, detail] of checks) {
+    console.log(`${ok ? '✅' : '❌'} ${name}  [${detail}]`);
+    if (ok) pass++;
+  }
+  return { ok: pass === checks.length, pass, total: checks.length };
+}
+
 // ---------- 运行 ----------
 scopedStorage.setItem(
   'agent_engine_config',
@@ -757,10 +827,11 @@ const r7 = await scenarioKnowledge();
 const r8 = await scenarioHistory();
 const r9 = await scenarioNewFeatures();
 const r10 = await scenarioModelExport();
+const r11 = await scenarioUiHealth();
 
-console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} · 场景9 ${r9.pass}/${r9.total} · 场景10 ${r10.pass}/${r10.total} ----`);
-if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok && r9.ok && r10.ok) {
-  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本 + 辩论提取 + 意图归一 + 碳排构成 + PKPM/YJK模型导出');
+console.log(`\n---- 汇总：场景1 ${r1.pass}/${r1.total} · 场景2 ${r2.pass}/${r2.total} · 场景3 ${r3.pass}/${r3.total} · 场景4 ${r4.pass}/${r4.total} · 场景5 ${r5.pass}/${r5.total} · 场景6 ${r6.pass}/${r6.total} · 场景7 ${r7.pass}/${r7.total} · 场景8 ${r8.pass}/${r8.total} · 场景9 ${r9.pass}/${r9.total} · 场景10 ${r10.pass}/${r10.total} · 场景11 ${r11.pass}/${r11.total} ----`);
+if (r1.ok && r2.ok && r3.ok && r4.ok && r5.ok && r6.ok && r7.ok && r8.ok && r9.ok && r10.ok && r11.ok) {
+  console.log('🎯 真实模式专项验证全部通过：回退闭环 + 崩溃降级 + 乱序零错位 + 自动重试 + 人类在环 + Chief结构化 + 知识库追溯 + 历史版本 + 辩论提取 + 意图归一 + 碳排构成 + PKPM/YJK模型导出 + UI体检');
   process.exit(0);
 } else {
   console.log('⚠️ 存在失败项，见上方 ❌');

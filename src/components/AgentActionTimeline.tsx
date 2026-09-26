@@ -151,10 +151,10 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
     };
 
     const agentBadgeColorMap: Record<string, string> = {
-      architect: 'border-teal/40 bg-teal/10 text-teal shadow-[0_0_12px_-2px_rgba(34,211,238,0.4)]',
-      code: 'border-amber/40 bg-amber/10 text-amber shadow-[0_0_12px_-2px_rgba(245,158,11,0.4)]',
-      economist: 'border-emerald/40 bg-emerald/10 text-emerald shadow-[0_0_12px_-2px_rgba(52,211,153,0.4)]',
-      chief: 'border-gold/40 bg-gold/10 text-gold shadow-[0_0_12px_-2px_rgba(234,179,8,0.45)]',
+      architect: 'border-teal/40 bg-teal/10 text-teal shadow-[0_0_18px_-3px_rgba(34,211,238,0.6)]',
+      code: 'border-amber/40 bg-amber/10 text-amber shadow-[0_0_18px_-3px_rgba(245,158,11,0.6)]',
+      economist: 'border-emerald/40 bg-emerald/10 text-emerald shadow-[0_0_18px_-3px_rgba(52,211,153,0.6)]',
+      chief: 'border-gold/40 bg-gold/10 text-gold shadow-[0_0_18px_-3px_rgba(234,179,8,0.65)]',
     };
 
     const visibleLogs = useMemo(() => {

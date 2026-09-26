@@ -236,15 +236,15 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                 { v: 7, label: '维度比选', suffix: '', accent: 'text-primary' },
                 { v: 16, label: '结构体系库', suffix: '+', accent: 'text-amber' },
                 { v: 3, label: '方案并行比选', suffix: '', accent: 'text-emerald' },
-              ].map((s2) => (
-                <div key={s2.label} className="flex flex-col items-start gap-0.5">
+              ].map((s2, si) => (
+                <div key={s2.label} className={`flex flex-col items-start gap-1 ${si > 0 ? 'border-l border-border/60 pl-3' : ''}`}>
                   <CountUpOnView
                     value={s2.v}
                     suffix={s2.suffix}
                     duration={1100}
-                    className={`data-number text-2xl font-black tracking-tight ${s2.accent}`}
+                    className={`data-number text-3xl font-black tracking-tight drop-shadow-[0_0_8px_rgba(18,165,181,0.35)] ${s2.accent}`}
                   />
-                  <span className="font-mono text-[9px] tracking-wider text-muted-foreground">
+                  <span className="font-mono text-[9px] tracking-wider text-muted-foreground/80">
                     {s2.label.toUpperCase()}
                   </span>
                 </div>
