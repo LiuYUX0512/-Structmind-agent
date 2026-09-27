@@ -1476,6 +1476,7 @@ ${dis || '- （待补充）'}
           selectedSchemeId={selectedSchemeId}
           onSelectScheme={handleSelectScheme}
           actionLog={actionLog}
+          metrics={metacognition?.metrics}
           currentAgentIndex={currentAgentIndex}
           isDemoMode={isDemoMode}
           thinkingCollapsed={thinkingCollapsed}

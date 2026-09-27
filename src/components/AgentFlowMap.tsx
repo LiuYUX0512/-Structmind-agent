@@ -4,15 +4,18 @@
 
 import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Wrench, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import type { IAgentActionLog, AgentType } from '@/agent/types';
+import { X, Wrench, ArrowDownRight } from 'lucide-react';
+import type { IAgentActionLog, AgentType, ITrajectoryMetrics } from '@/agent/types';
 import { SUB_AGENT_SPECS } from '@/agent/types';
+import { estimateTokens } from '@/agent/memory';
 
 interface AgentFlowMapProps {
   logs: IAgentActionLog[];
   /** 当前播放/执行的 step（该节点点亮） */
   playingStep?: number | null;
   isPlaying?: boolean;
+  /** 元认知轨迹指标（节点 token/耗时来源） */
+  metrics?: ITrajectoryMetrics;
 }
 
 interface FlowNode {
@@ -58,18 +61,38 @@ function analyzeNodeStatus(result: unknown): 'pass' | 'warning' | 'fail' | 'neut
   return 'neutral';
 }
 
-/** 边数据叙事：根据上下游 Agent 推断这条边传递了什么数据 */
-function getEdgeLabel(from: FlowNode, to: FlowNode): string {
-  if (to.agent === 'architect') return '打回重新选型';
-  if (from.agent === 'architect' && to.agent === 'code') return '候选方案';
-  if (from.agent === 'architect' && to.agent === 'economist') return '候选方案';
-  if (from.agent === 'code' && to.agent === 'chief') return '校核结论';
-  if (from.agent === 'economist' && to.agent === 'chief') return '评估指标';
-  if (from.agent === 'code' && to.agent === 'economist') return '合规方案';
+/** 边数据叙事：从本次运行 actionLog 动态提取（非写死），评委问"标签是真的吗"能答出 */
+function getEdgeLabel(from: FlowNode, to: FlowNode, logs: IAgentActionLog[]): string {
+  // 回退边：Code → Architect，提取实际违规条数与条文
+  if (to.agent === 'architect') {
+    const failResults = logs.filter(
+      (l) => l.type === 'tool_result' && l.tool === 'check_seismic_requirements'
+    );
+    const failChecks = failResults.flatMap((l) => {
+      const r = l.result as { checks?: Array<{ status?: string; name?: string }> } | undefined;
+      return (r?.checks ?? []).filter((c) => c.status === 'fail');
+    });
+    if (failChecks.length > 0) {
+      return `发现 ${failChecks.length} 条强条违规：${failChecks.map((c) => c.name).join('、')}`;
+    }
+    return '打回重新选型';
+  }
+  // Architect → Code / Economist：提取实际候选方案数
+  if (from.agent === 'architect' && (to.agent === 'code' || to.agent === 'economist')) {
+    const qs = logs.find((l) => l.tool === 'query_structure_systems' && l.type === 'tool_result');
+    const candidates = (qs?.result as { candidates?: Array<{ id?: string; name?: string }> } | undefined)?.candidates;
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return `传递 ${candidates.length} 个候选方案`;
+    }
+    return '传递候选方案';
+  }
+  if (from.agent === 'code' && to.agent === 'chief') return '传递校核结论';
+  if (from.agent === 'economist' && to.agent === 'chief') return '传递评估指标';
+  if (from.agent === 'code' && to.agent === 'economist') return '传递合规方案';
   return '';
 }
 
-const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlowMapProps) => {
+const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false, metrics }: AgentFlowMapProps) => {
   const [selectedStep, setSelectedStep] = useState<number | null>(null);
 
   // 选中节点的完整日志（侧滑面板证据链）
@@ -77,6 +100,16 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
     () => logs.find((l) => l.step === selectedStep) ?? null,
     [logs, selectedStep]
   );
+
+  // 选中节点所属 Agent 的 token 消耗 + 耗时（可解释 AI 的量化证据）
+  const selectedAgentStats = useMemo(() => {
+    if (!selectedLog) return null;
+    const agent = selectedLog.agent || 'architect';
+    const agentLogs = logs.filter((l) => l.agent === agent);
+    const tokens = agentLogs.reduce((sum, l) => sum + estimateTokens(l.content ?? ''), 0);
+    const duration = metrics?.nodeDurations?.[agent] ?? 0;
+    return { tokens, duration, logCount: agentLogs.length };
+  }, [logs, selectedLog, metrics]);
 
   const nodes = useMemo<FlowNode[]>(() => {
     return logs
@@ -143,7 +176,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
       if (!a || !b) continue;
       const color = AGENT_FLOW_COLOR[nodes[i].agent];
       const active = isPlaying && (playingStep === nodes[i].step || playingStep === nodes[i - 1].step);
-      const label = getEdgeLabel(nodes[i - 1], nodes[i]);
+      const label = getEdgeLabel(nodes[i - 1], nodes[i], logs);
       let path: string;
       if (a.x === b.x) {
         path = `M ${a.x} ${a.y + 20} L ${b.x} ${b.y - 20}`;
@@ -164,7 +197,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
       });
     }
     return out;
-  }, [nodes, pos, isPlaying, playingStep]);
+  }, [nodes, pos, isPlaying, playingStep, logs]);
 
   const reworkPaths = useMemo(() => {
     return reworkEdges
@@ -318,12 +351,18 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
             : done
               ? `${color}1a`
               : 'rgba(100,116,139,0.06)';
+          // replan 插入的新节点（回退边的目标）——从父节点旁"生长"出来
+          const isReplanNode = reworkEdges.some((e) => e.toStep === n.step);
           return (
-            <g
+            <motion.g
               key={n.step}
               className={isActive ? 'agent-flow-active' : undefined}
               onClick={() => setSelectedStep(isSelected ? null : n.step)}
               style={{ cursor: 'pointer' }}
+              initial={isReplanNode ? { opacity: 0, scale: 0.2 } : false}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={isReplanNode ? { duration: 0.6, ease: 'easeOut' } : { duration: 0 }}
+              {...(isReplanNode ? { style: { cursor: 'pointer', transformOrigin: `${p.x}px ${p.y}px`, transformBox: 'fill-box' as const } } : { style: { cursor: 'pointer' } })}
             >
               {/* 选中高亮环 */}
               {isSelected && (
@@ -364,7 +403,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
               </text>
               {/* 放电延迟：节点逐个亮起（SMIL 动画，浏览器原生） */}
               <animate attributeName="opacity" from="0" to="1" dur="0.3s" begin={`${i * 0.12}s`} fill="freeze" />
-            </g>
+            </motion.g>
           );
         })}
 
@@ -411,6 +450,20 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
                 <X className="size-4" />
               </button>
             </div>
+
+            {/* 量化证据：token 消耗 + 耗时（数字英雄级） */}
+            {selectedAgentStats && (
+              <div className="mt-2 grid grid-cols-2 gap-element rounded-md bg-background/60 p-element">
+                <div>
+                  <div className="text-caption">Token 消耗</div>
+                  <div className="text-hero-number !text-3xl text-primary">{selectedAgentStats.tokens.toLocaleString()}</div>
+                </div>
+                <div>
+                  <div className="text-caption">耗时</div>
+                  <div className="text-hero-number !text-3xl text-teal">{(selectedAgentStats.duration / 1000).toFixed(1)}s</div>
+                </div>
+              </div>
+            )}
 
             <div className="mt-2 space-y-2 text-xs">
               {/* 类型标签 */}

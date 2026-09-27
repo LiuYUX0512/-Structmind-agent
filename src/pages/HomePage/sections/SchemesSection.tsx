@@ -39,7 +39,7 @@ import type {
   IStructureScheme,
   IExtremeParamAlert,
 } from '@/data/structure';
-import { SUB_AGENT_SPECS, type IAgentActionLog, type AgentType } from '@/agent/types';
+import { SUB_AGENT_SPECS, type IAgentActionLog, type AgentType, type ITrajectoryMetrics } from '@/agent/types';
 import type { AgentActionTimelineRef } from '@/components/AgentActionTimeline';
 import { useActionPlayer } from '@/hooks/use-action-player';
 
@@ -49,6 +49,8 @@ interface SchemesSectionProps {
   selectedSchemeId: string | null;
   onSelectScheme: (id: string) => void;
   actionLog: IAgentActionLog[];
+  /** 元认知轨迹指标（节点 token/耗时来源） */
+  metrics?: ITrajectoryMetrics;
   /** 当前 Agent 索引 (0=未开始, 1-4=已完成/进行中的agent数) */
   currentAgentIndex: number;
   /** 是否演示轨迹模式 */
@@ -103,6 +105,7 @@ function SchemesSection({
   selectedSchemeId,
   onSelectScheme,
   actionLog,
+  metrics,
   currentAgentIndex,
   isDemoMode,
   thinkingCollapsed,
@@ -478,6 +481,7 @@ function SchemesSection({
                 typingText={currentTypingText}
                 playingLog={currentPlayingLog}
                 isPlaying={isPlayerActive}
+                metrics={metrics}
               />
             </CardContent>
           </Card>

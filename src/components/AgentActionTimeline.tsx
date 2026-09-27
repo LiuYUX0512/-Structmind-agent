@@ -24,7 +24,7 @@ import {
   List,
   Sparkles,
 } from 'lucide-react';
-import type { IAgentActionLog, AgentType } from '@/agent/types';
+import type { IAgentActionLog, AgentType, ITrajectoryMetrics } from '@/agent/types';
 import { SUB_AGENT_SPECS } from '@/agent/types';
 import AgentFlowMap from '@/components/AgentFlowMap';
 import { Button } from '@/components/ui/button';
@@ -49,6 +49,8 @@ interface AgentActionTimelineProps {
   playingLog?: IAgentActionLog | null;
   /** 播放模式：是否正在播放（用于显示思考/加载光标） */
   isPlaying?: boolean;
+  /** 元认知轨迹指标（节点 token/耗时来源） */
+  metrics?: ITrajectoryMetrics;
 }
 
 export interface AgentActionTimelineRef {
@@ -68,6 +70,7 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
       typingText = '',
       playingLog = null,
       isPlaying = false,
+      metrics,
     },
     ref
   ) {
@@ -382,6 +385,7 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
               logs={logs}
               playingStep={isPlaying ? playingLog?.step ?? null : null}
               isPlaying={isPlaying}
+              metrics={metrics}
             />
           </div>
         </div>
