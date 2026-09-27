@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award } from 'lucide-react';
+import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award, Brain, Database, Cpu } from 'lucide-react';
 import StructureWireframe3D from '@/components/StructureWireframe3D';
 import CountUpOnView from '@/components/CountUpOnView';
 import { MOCK_PROJECT_PARAMS, type IProjectParams, type IStructureScheme } from '@/data/structure';
@@ -20,6 +20,28 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
     { icon: PenTool, label: '方案创作', desc: '多体系智能生成', accent: 'primary' },
     { icon: Scale, label: '规范校核', desc: 'GB 55002 · 50011', accent: 'teal' },
     { icon: RefreshCw, label: '优化迭代', desc: '七维比选寻优', accent: 'amber' },
+  ];
+
+  // 三层架构能力徽章（让评委 30 秒内看出「和别人的不一样」——不是普通工作流，而是会思考的智能体）
+  const capabilities = [
+    {
+      icon: Brain,
+      label: '动态规划引擎',
+      desc: 'Planner 生成 DAG 计划，调度器支持条件跳过与递归重规划',
+      accent: 'text-teal border-teal/40 bg-teal/10',
+    },
+    {
+      icon: Database,
+      label: '主动记忆系统',
+      desc: '短期压缩 + 长期偏好注入 + 经验闭环激活',
+      accent: 'text-gold border-gold/40 bg-gold/10',
+    },
+    {
+      icon: Cpu,
+      label: '元认知自进化',
+      desc: 'Chief 评价执行轨迹，反思写入经验库，下次自动改 DAG',
+      accent: 'text-primary border-primary/40 bg-primary/10',
+    },
   ];
 
   // 展示用参数：用户已输入则用真实值，否则用默认示例（让首屏 3D 是"活的"）
@@ -145,6 +167,32 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                 基于土木工程专业知识库，让结构方案决策更科学、更高效
               </span>
             </motion.p>
+
+            {/* 三层架构能力徽章（评委第一眼看到的三层架构） */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.45, duration: 0.6 }}
+              className="mb-6 flex flex-wrap items-center gap-2"
+            >
+              {capabilities.map((c) => {
+                const Icon = c.icon;
+                return (
+                  <div
+                    key={c.label}
+                    className={`group relative flex cursor-default items-center gap-1.5 border px-3 py-1.5 ${c.accent}`}
+                    style={{ borderRadius: '4px' }}
+                  >
+                    <Icon className="size-3.5" strokeWidth={2} />
+                    <span className="text-xs font-semibold">{c.label}</span>
+                    {/* hover 展开一句话解释 */}
+                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-64 max-w-[80vw] translate-y-1 rounded-md border border-border/60 bg-card/95 p-2.5 opacity-0 shadow-lg backdrop-blur-md transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+                      <div className="text-[11px] leading-relaxed text-foreground/80">{c.desc}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </motion.div>
 
             {/* 三个功能标签卡片 */}
             <motion.div

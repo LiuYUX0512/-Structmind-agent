@@ -19,6 +19,8 @@ interface FlowNode {
   kind: 'think' | 'tool_call' | 'tool_result' | 'conclusion';
   tool?: string;
   status?: 'pass' | 'warning' | 'fail' | 'neutral';
+  /** 是否为记忆/元认知/经验闭环相关节点（预校核等），需特殊高亮 */
+  isMemory?: boolean;
 }
 
 interface ReworkEdge {
@@ -65,6 +67,8 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
         kind: l.type,
         tool: l.tool,
         status: l.type === 'tool_result' ? analyzeNodeStatus(l.result) : undefined,
+        // 记忆/元认知/经验闭环节点（预校核、[Memory]、[Metacognition]）金色高亮
+        isMemory: !!l.content && /\[预校核\]|\[Memory\]|\[Metacognition\]/.test(l.content),
       }));
   }, [logs]);
 
@@ -164,6 +168,11 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
           MULTI-AGENT EXECUTION GRAPH · 执行网络
         </div>
         <div className="flex items-center gap-3">
+          {nodes.some((n) => n.isMemory) && (
+            <span className="flex items-center gap-1 rounded-sm border border-gold/40 bg-gold/10 px-1.5 py-0.5 text-[9px] font-medium text-gold">
+              🧠 经验闭环生效（金色节点）
+            </span>
+          )}
           {FLOW_AGENTS.map((a) => (
             <span key={a} className="flex items-center gap-1 text-[9px] text-muted-foreground/80">
               <span
@@ -244,7 +253,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
         {/* 节点 */}
         {nodes.map((n, i) => {
           const p = pos[n.step];
-          const color = AGENT_FLOW_COLOR[n.agent];
+          const color = n.isMemory ? '#eab308' : AGENT_FLOW_COLOR[n.agent];
           const isActive = isPlaying && playingStep === n.step;
           const done = !isPlaying || n.step < (playingStep ?? Number.MAX_SAFE_INTEGER);
           const statusColor =

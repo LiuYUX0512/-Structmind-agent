@@ -20,6 +20,7 @@ import ParamsSection from './sections/ParamsSection';
 import SchemesSection from './sections/SchemesSection';
 import ComparisonSection from './sections/ComparisonSection';
 import MetacognitionPanel from '@/components/MetacognitionPanel';
+import MemoryPanel from '@/components/MemoryPanel';
 import { DebatePanel } from '@/components/DebatePanel';
 import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
@@ -1538,6 +1539,7 @@ ${dis || '- （待补充）'}
           confidence={lastAdvice?.confidence ? { level: lastAdvice.confidence.level, score: lastAdvice.confidence.score } : undefined}
           risks={lastAdvice?.risks}
         />
+        <MemoryPanel logs={actionLog} />
         <ChatSection
           messages={chatMessages}
           isLoading={isChatLoading}
