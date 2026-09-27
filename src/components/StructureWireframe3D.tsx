@@ -103,17 +103,23 @@ function deriveStructureComponents(
     out.beamDensity = 1;
     out.label = '框架-剪力墙结构';
     out.accentColor = '#12A5B5';
-    // 四周 + 中间几道剪力墙
-    const midX = Math.floor(baysX / 2);
-    const midZ = Math.floor(baysZ / 2);
+    // 剪力墙布置：楼电梯间（中部）+ 四角各一跨。
+    // ⚠️ 关键：所有墙段的 (x/z, length) 都必须落在 [0, baysX] × [0, baysZ] 内，
+    //    起点取最后一跨的起始格线（baysX-1 / baysZ-1），而不是边界格线（baysX / baysZ）——
+    //    后者会让 dir='x' 的墙从边界再向外画一整跨，凸出建筑外轮廓（多余的显示部分）。
+    const lastX = Math.max(0, baysX - 1);
+    const lastZ = Math.max(0, baysZ - 1);
     out.wallSegments.push(
+      // 左、右两侧沿 X 向的墙（贴外轮廓，向内一跨）
       { x: 0, z: 0, dir: 'x', length: 1, thickness: 2 },
-      { x: baysX, z: 0, dir: 'x', length: 1, thickness: 2 },
+      { x: lastX, z: 0, dir: 'x', length: 1, thickness: 2 },
       { x: 0, z: baysZ, dir: 'x', length: 1, thickness: 2 },
-      { x: baysX, z: baysZ, dir: 'x', length: 1, thickness: 2 },
-      { x: midX, z: 0, dir: 'x', length: 1, thickness: 2 },
-      { x: 0, z: midZ, dir: 'z', length: 1, thickness: 2 },
-      { x: baysX, z: midZ, dir: 'z', length: 1, thickness: 2 },
+      { x: lastX, z: baysZ, dir: 'x', length: 1, thickness: 2 },
+      // 中部楼电梯间的横墙（示意核心抗侧构件）
+      { x: Math.floor((baysX - 1) / 2), z: 0, dir: 'x', length: 1, thickness: 2 },
+      // 沿 Z 向的两道墙（同样向内一跨，落在深度范围内）
+      { x: 0, z: Math.min(lastZ, Math.floor((baysZ - 1) / 2)), dir: 'z', length: 1, thickness: 2 },
+      { x: baysX, z: Math.min(lastZ, Math.floor((baysZ - 1) / 2)), dir: 'z', length: 1, thickness: 2 },
     );
     return out;
   }
@@ -124,15 +130,15 @@ function deriveStructureComponents(
     out.beamDensity = 0.3;
     out.label = '剪力墙结构';
     out.accentColor = '#E8930C';
-    // 密集剪力墙条带
+    // 密集剪力墙条带：Z 向墙落在 x∈[0,baysX]，长度须 ≤ baysZ*0.85（避免凸出轮廓）
     const spacing = Math.max(1, Math.floor(baysX / 4));
     for (let i = 0; i <= baysX; i += spacing) {
-      out.wallSegments.push({ x: i, z: 0, dir: 'z', length: baysZ, thickness: 3 });
+      out.wallSegments.push({ x: i, z: 0, dir: 'z', length: Math.max(1, Math.round(baysZ * 0.85)), thickness: 3 });
     }
-    // 横向也加几道
+    // 横向也加几道（同样限制在深度范围内）
     const zSpacing = Math.max(1, Math.floor(baysZ / 3));
     for (let j = 0; j <= baysZ; j += zSpacing) {
-      out.wallSegments.push({ x: 0, z: j, dir: 'x', length: baysX, thickness: 2.5 });
+      out.wallSegments.push({ x: 0, z: j, dir: 'x', length: Math.max(1, Math.round(baysX * 0.85)), thickness: 2.5 });
     }
     return out;
   }
@@ -196,14 +202,14 @@ function deriveStructureComponents(
     out.beamDensity = 0.1;
     out.label = '砌体结构';
     out.accentColor = '#b45309';
-    // 密密麻麻的横墙
+    // 密密麻麻的横墙（长度限制在深度范围内，避免凸出轮廓）
     const spacing = Math.max(1, Math.floor(baysX / 3));
     for (let i = 0; i <= baysX; i += spacing) {
-      out.wallSegments.push({ x: i, z: 0, dir: 'z', length: baysZ, thickness: 4 });
+      out.wallSegments.push({ x: i, z: 0, dir: 'z', length: Math.max(1, Math.round(baysZ * 0.85)), thickness: 4 });
     }
-    // 纵墙也加
+    // 纵墙也加（长度限制在宽度范围内）
     for (let j = 0; j <= baysZ; j += Math.max(1, Math.floor(baysZ / 4))) {
-      out.wallSegments.push({ x: 0, z: j, dir: 'x', length: baysX, thickness: 3 });
+      out.wallSegments.push({ x: 0, z: j, dir: 'x', length: Math.max(1, Math.round(baysX * 0.85)), thickness: 3 });
     }
     return out;
   }
@@ -724,23 +730,30 @@ function StructureWireframeSVG({ params, scheme, codeChecks, autoRotate }: Struc
   struct.wallSegments.forEach((w, idx) => {
     const wx = w.x * geom.gridX;
     const wz = w.z * geom.gridZ;
-    const wallLength = w.dir === 'x'
-      ? w.length * geom.gridX
-      : w.length * geom.gridZ;
 
-    // 计算墙两端的坐标（从起点到终点的整段墙，而不是中点一根线）
+    // ===== 边界护栏：墙段必须落在建筑轮廓 [0, totalWidth] × [0, totalDepth] 内 =====
+    // 防止任何来源的墙段（含未来新增体系）沿 x/z 方向画出外轮廓，
+    // 造成 3D 预览出现"多余的显示部分"。超界时把墙段裁剪回轮廓内（保留最小可见长度）。
     let startX: number, startZ: number, endX: number, endZ: number;
     if (w.dir === 'x') {
       startX = wx;
       startZ = wz;
-      endX = wx + wallLength;
+      endX = wx + w.length * geom.gridX;
       endZ = wz;
     } else {
       startX = wx;
       startZ = wz;
       endX = wx;
-      endZ = wz + wallLength;
+      endZ = wz + w.length * geom.gridZ;
     }
+    // 裁剪到轮廓内
+    startX = Math.max(0, Math.min(geom.totalWidth, startX));
+    endX = Math.max(0, Math.min(geom.totalWidth, endX));
+    startZ = Math.max(0, Math.min(geom.totalDepth, startZ));
+    endZ = Math.max(0, Math.min(geom.totalDepth, endZ));
+    // 保底：若裁剪后退化为一个点（墙完全在轮廓外），直接跳过不画
+    const clippedLen = w.dir === 'x' ? Math.abs(endX - startX) : Math.abs(endZ - startZ);
+    if (clippedLen < geom.gridX * 0.05 && clippedLen < geom.gridZ * 0.05) return;
 
     // 墙的正面（迎光面）矩形：底两顶点 + 顶两顶点
     // 给墙一个厚度（沿垂直于墙的方向偏移 wallThickness）
