@@ -69,3 +69,4 @@ scripts/verify-norm-out/
 scripts/verify-domain-out/
 scripts/verify-decision-out/
 scripts/verify-counterfactual-out/
+scripts/verify-kb-out/
