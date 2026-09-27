@@ -71,3 +71,4 @@ scripts/verify-decision-out/
 scripts/verify-counterfactual-out/
 scripts/verify-kb-out/
 scripts/verify-dag-out/
+scripts/verify-memory-out/

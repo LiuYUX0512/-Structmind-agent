@@ -18,6 +18,7 @@
     "verify:decision": "vite build --config scripts/vite-verify-decision.config.ts && node scripts/verify-decision-out/verify-decision.js",
     "verify:counterfactual": "vite build --config scripts/vite-verify-counterfactual.config.ts && node scripts/verify-counterfactual-out/verify-counterfactual.js",
     "verify:dag": "vite build --config scripts/vite-verify-dag.config.ts && node scripts/verify-dag-out/verify-dag.js",
+    "verify:memory": "vite build --config scripts/vite-verify-memory.config.ts && node scripts/verify-memory-out/verify-memory.js",
     "verify:entry": "vite build --config scripts/vite-verify.config.ts && node scripts/verify-out/verify-entry.js",
     "verify:agentic": "vite build --config scripts/vite-verify-agentic.config.ts && node scripts/verify-out/verify-agentic.js"
   },

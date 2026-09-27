@@ -240,6 +240,7 @@ export default function HomePage() {
     model: 'deepseek-chat',
     apiKey: '',
     mode: 'auto' as 'auto' | 'real' | 'demo',
+    compressThreshold: 4000,
   });
   const [currentIntent, setCurrentIntent] = useState<IIntentResult | null>(null);
   const [agentContext, setAgentContext] = useState<IConversationContext | null>(null);
@@ -276,6 +277,7 @@ export default function HomePage() {
           model: engineCfg.model || 'deepseek-chat',
           apiKey: engineCfg.apiKey || '',
           mode: (engineCfg.mode === 'trace' ? 'demo' : (engineCfg.mode || 'auto')) as 'auto' | 'real' | 'demo',
+          compressThreshold: engineCfg.compressThreshold ?? 4000,
         });
       }
 
@@ -781,8 +783,9 @@ ${dis || '- （待补充）'}
               model: agentConfig.model || undefined,
               apiKey: agentConfig.apiKey || undefined,
               maxSteps: 20,
+              compressThreshold: agentConfig.compressThreshold,
             }
-          : { mode: 'trace' as const, maxSteps: 20 };
+          : { mode: 'trace' as const, maxSteps: 20, compressThreshold: agentConfig.compressThreshold };
 
         // 完整管线运行
         // 真实模式：每个子 Agent 阶段完成即回调 onProgress，UI 逐步追加日志并点亮对应 Agent 卡片，

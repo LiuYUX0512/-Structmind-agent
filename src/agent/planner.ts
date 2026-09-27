@@ -19,9 +19,10 @@
 
 import type { AgentType } from './types';
 import type { IProjectParams, IWeightConfig } from '@/data/structure';
+import type { IPreference, IExperience } from './memory';
 
 /** 规划节点种类（供 pipeline 绑定 executor 时识别） */
-export type PlanNodeKind = 'architect' | 'code' | 'economist' | 'chief';
+export type PlanNodeKind = 'architect' | 'code' | 'economist' | 'chief' | 'precheck';
 
 /** 计划节点规格：纯拓扑声明，不含 executor */
 export interface IPlanNodeSpec {
@@ -58,23 +59,88 @@ export interface IPlanContext {
   /** 是否允许校核回退闭环（对应 IEngineConfig.allowRecheck） */
   allowRecheck: boolean;
   /**
-   * 未来扩展（模块②③）：记忆系统注入的用户偏好 / 历史经验，
-   * Planner 据此做条件跳过与拓扑调整。
+   * 记忆系统注入（模块②③）：用户偏好 / 历史经验，
+   * Planner 据此做条件跳过与拓扑调整（经验闭环激活）。
    */
   memory?: {
-    preferences?: unknown[];
-    experiences?: unknown[];
+    preferences?: IPreference[];
+    experiences?: IExperience[];
   };
 }
 
 export class Planner {
   /**
-   * 生成计划。模块① 恒返回默认模板；模块②③ 将在此分流：
-   * 有记忆注入时走 buildDynamicPlan，否则退回默认模板。
+   * 生成计划：默认模板 → 经验闭环激活（读 ctx.memory.experiences，
+   * 命中则真实修改拓扑，如 Architect 后插入预校核节点）。
    */
   buildPlan(ctx: IPlanContext): IPlanNodeSpec[] {
-    // 模块②③ 扩展点：这里会读 ctx.memory 决定是否动态化
-    return this.buildDefaultPlan(ctx);
+    const plan = this.buildDefaultPlan(ctx);
+    return this.applyExperiences(plan, ctx.memory?.experiences ?? [], ctx);
+  }
+
+  /**
+   * 经验闭环激活（模块③灵魂）：把命中当前上下文的经验转成真实的拓扑操作。
+   * 这是代码级逻辑，不是「存日志就完事」——经验命中会真正改变 DAG 结构。
+   */
+  private applyExperiences(plan: IPlanNodeSpec[], experiences: IExperience[], ctx: IPlanContext): IPlanNodeSpec[] {
+    let result = plan;
+    for (const exp of experiences) {
+      const triggerCtx = { params: ctx.params, realMode: ctx.realMode, allowRecheck: ctx.allowRecheck };
+      if (!exp.trigger(triggerCtx)) continue;
+      switch (exp.kind) {
+        case 'insert-precheck':
+          result = this.insertPrecheckNode(result, exp);
+          break;
+        case 'skip-node':
+          result = this.skipNode(result, exp);
+          break;
+        case 'reorder':
+          // 预留：调整依赖顺序（模块③暂不实现，避免引入未验证的复杂度）
+          break;
+      }
+    }
+    return result;
+  }
+
+  /**
+   * 在 applyTo 节点后插入预校核节点，并把「校核类下游节点（kind=code）」对
+   * applyTo 的依赖重定向到预校核节点。economist 仍直接依赖 architect + code
+   * （它不读预校核结果，无需重定向）。
+   */
+  private insertPrecheckNode(plan: IPlanNodeSpec[], exp: IExperience): IPlanNodeSpec[] {
+    const targetIdx = plan.findIndex((n) => n.id === exp.applyTo);
+    if (targetIdx === -1) return plan;
+    const precheckId = `precheck-${exp.id}`;
+
+    // 重定向：code 节点依赖 applyTo → 改为依赖 precheck（预校核是它的新上游）
+    const redirected = plan.map((n) => {
+      if (n.kind === 'code' && n.deps.includes(exp.applyTo)) {
+        return { ...n, deps: n.deps.map((d) => (d === exp.applyTo ? precheckId : d)) };
+      }
+      return n;
+    });
+
+    const precheckNode: IPlanNodeSpec = {
+      id: precheckId,
+      label: '抗震预校核（经验闭环）',
+      agent: 'code',
+      kind: 'precheck',
+      deps: [exp.applyTo],
+    };
+
+    const out = [...redirected];
+    out.splice(targetIdx + 1, 0, precheckNode);
+    return out;
+  }
+
+  /** 给 applyTo 节点加 when 条件（跳过）。模块③暂用简单的条件：when 恒 false 会跳过 */
+  private skipNode(plan: IPlanNodeSpec[], exp: IExperience): IPlanNodeSpec[] {
+    return plan.map((n) => {
+      if (n.id === exp.applyTo) {
+        return { ...n, when: () => false };
+      }
+      return n;
+    });
   }
 
   /**

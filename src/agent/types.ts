@@ -287,6 +287,12 @@ export interface IEngineConfig {
   retryMax?: number;
   /** 重试退避基数 ms（默认 800，第 N 次重试延迟 = base * N） */
   retryBaseDelayMs?: number;
+  /**
+   * 短期记忆压缩阈值（token 数，默认 4000）。
+   * 单个 Agent 轨迹估算 token 超过此值即触发 compress() 提炼事实摘要。
+   * UI 配置面板可调（如调到 800 现场演示「上下文过长自动压缩」）。
+   */
+  compressThreshold?: number;
 }
 
 /** 对话意图类型 */

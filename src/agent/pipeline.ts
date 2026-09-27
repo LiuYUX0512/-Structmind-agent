@@ -6,8 +6,19 @@
 
 import { TraceEngine } from './trace-engine';
 import { RealEngine } from './real-engine';
+import { executeToolByName } from './tools';
 import { DagScheduler, type ITaskNode, type IReplanInstruction } from './dag-engine';
 import { Planner, type IPlanNodeSpec } from './planner';
+import {
+  MemorySystem,
+  RuleCompressor,
+  LlmCompressor,
+  type ICompressor,
+  type IMemoryEvent,
+  type IMemoryTriggerContext,
+  type IPreference,
+  type IExperience,
+} from './memory';
 import {
   SUB_AGENT_SPECS,
   type IAgentPipelineResult,
@@ -141,6 +152,20 @@ export class AgentPipeline {
   /** 单例推理引擎：四个子 Agent 共享同一个 RealEngine 实例（配置/重试参数复用） */
   private engine: RealEngine;
 
+  // ===== 记忆系统（模块②）=====
+  /** 记忆系统单例（短期压缩 / 长期偏好 / 经验记忆） */
+  private memory: MemorySystem;
+  /** 压缩器：real 用 LLM（独立无状态请求），trace 用规则抽取 */
+  private compressor: ICompressor;
+  /** 跨阶段累积的事实摘要（压缩产物，注入后续 Agent 的 prompt） */
+  private cumulativeSummary = '';
+  /** 已压缩处理的日志游标（阶段边界切片用） */
+  private compressedLogCount = 0;
+  /** 本次运行命中的长期偏好（scanPreferences 结果） */
+  private memoryPrefs: IPreference[] = [];
+  /** 偏好提示文本（注入 Architect 选型 prompt） */
+  private preferenceHint = '';
+
   constructor(
     params: IProjectParams,
     weights?: IWeightConfig,
@@ -154,11 +179,102 @@ export class AgentPipeline {
     this.onProgress = onProgress;
     this.onDegrade = onDegrade;
     this.engine = new RealEngine(this.params, this.weights, this.config);
+    // 记忆系统初始化：real 模式用 LLM 压缩（独立请求），trace 模式用规则抽取
+    this.memory = new MemorySystem();
+    this.compressor =
+      this.config.mode === 'real'
+        ? new LlmCompressor((text, instruction) => this.engine.summarize(text, instruction))
+        : new RuleCompressor();
   }
 
   /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
   private emitProgress(agentIndex: number): void {
     this.onProgress?.([...this.actionLog], agentIndex);
+  }
+
+  /** 记忆可见化：把记忆事件写入 actionLog（评委可见「系统在思考」） */
+  private pushMemoryLog(event: IMemoryEvent): void {
+    this.actionLog.push({
+      step: this.actionLog.length + 1,
+      type: 'think',
+      agent: 'chief',
+      content: event.message,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * 阶段边界压缩（事件驱动）：取「上次压缩以来新增的日志」，估算 token，
+   * 超过 compressThreshold（默认 4000）则压缩为事实摘要，累积到 cumulativeSummary。
+   * 触发时写一条 [Memory] 日志（记忆可见化）。
+   */
+  private async compressStage(): Promise<void> {
+    const newLogs = this.actionLog.slice(this.compressedLogCount);
+    this.compressedLogCount = this.actionLog.length;
+    if (newLogs.length === 0) return;
+
+    const threshold = this.config.compressThreshold ?? 4000;
+    const res = await this.memory.maybeCompress(newLogs, threshold, this.compressor);
+    if (res.triggered && res.summary) {
+      this.cumulativeSummary += (this.cumulativeSummary ? '\n' : '') + res.summary;
+      if (res.event) this.pushMemoryLog(res.event);
+    }
+  }
+
+  /** 把累积摘要注入 real 模式 Agent 的 prompt（LLM 可感知前置阶段事实） */
+  private injectSummary(prompt: string): string {
+    if (!this.cumulativeSummary) return prompt;
+    return prompt + `\n\n## 📋 前置阶段事实摘要（记忆系统自动压缩）\n${this.cumulativeSummary}`;
+  }
+
+  /**
+   * 长期记忆主动注入（模块②决策 2）：runAgentPipeline 启动时扫描参数，
+   * 命中历史偏好则主动拼接（不等 Planner 询问）。命中时写 [Memory] 日志（可见化）。
+   */
+  private applyMemoryInjection(): void {
+    const { prefs, events } = this.memory.scanPreferences(this.params);
+    this.memoryPrefs = prefs;
+    this.preferenceHint = this.memory.buildPreferenceHint(prefs);
+    for (const ev of events) {
+      this.pushMemoryLog(ev);
+    }
+  }
+
+  /** 把偏好提示注入 Architect 选型 prompt（选型是偏好最该影响的环节） */
+  private injectPreference(prompt: string): string {
+    if (!this.preferenceHint) return prompt;
+    return prompt + `\n\n${this.preferenceHint}`;
+  }
+
+  /**
+   * 读取命中当前上下文的经验（供 Planner 修改 DAG 拓扑，模块③闭环激活）。
+   * trigger 纯函数由 memory.recallExperiences 内部调用。
+   */
+  private recallExperiences(): IExperience[] {
+    const ctx: IMemoryTriggerContext = {
+      params: this.params,
+      realMode: this.config.mode === 'real',
+      allowRecheck: this.config.allowRecheck !== false,
+    };
+    return this.memory.recallExperiences(ctx).experiences;
+  }
+
+  /**
+   * 主动写入（模块②决策 3）：每次运行结束后自动提炼一句偏好存入库，
+   * 不等用户手动存。这样下次运行才有记忆可注入。
+   */
+  private distillPreference(): void {
+    if (!this.finalResult) return;
+    const schemeName = this.finalResult.recommended.schemeName;
+    const text = `用户接受推荐方案「${schemeName}」，倾向该体系与综合性能`;
+    const featureKey = `seismic-${this.params.seismicIntensity ?? 'unknown'}`;
+    this.memory.storePreference(text, featureKey);
+    this.pushMemoryLog({
+      kind: 'experience-store',
+      message: `[Memory] 已自动提炼本次运行偏好：${text}`,
+    });
+    // 记忆日志同步进最终结果（主动写入也要可见）
+    this.finalResult.actionLog = [...this.actionLog];
   }
 
   /** 设定人类在环干预项（工程师在环：锁定方案/预算上限/强制权重/备注）。必须在 run() 前调用 */
@@ -221,7 +337,10 @@ export class AgentPipeline {
     }
 
     try {
-      return await this.execute();
+      const result = await this.execute();
+      // 主动写入：运行结束后自动提炼偏好存库（下次运行可注入）
+      this.distillPreference();
+      return result;
     } catch (e) {
       // 保命机制：真实模式崩溃时自动降级到演示轨迹模式继续跑完（透明降级，不静默）
       if (this.config.mode === 'real') {
@@ -231,6 +350,7 @@ export class AgentPipeline {
         this.onDegrade?.(reason);
         const result = await this.execute();
         this.finalResult = { ...result, degraded: { from: 'real', reason } };
+        this.distillPreference();
         return this.finalResult;
       }
       throw e;
@@ -243,6 +363,8 @@ export class AgentPipeline {
    *   其余（默认 'static'）→ runCore（旧硬编码四阶段，保命默认值）
    */
   private async execute(): Promise<IAgentPipelineResult> {
+    // 长期记忆主动注入：启动时扫描参数、命中偏好则拼接（模块②决策 2）
+    this.applyMemoryInjection();
     if (this.config.plannerMode === 'dynamic') {
       return this.runDynamic();
     }
@@ -262,6 +384,11 @@ export class AgentPipeline {
       weights: this.weights,
       realMode: this.config.mode === 'real',
       allowRecheck: this.config.allowRecheck !== false,
+      // 记忆注入：长期偏好 + 历史经验（Planner 据此做拓扑调整）
+      memory: {
+        preferences: this.memoryPrefs,
+        experiences: this.recallExperiences(),
+      },
     });
 
     const scheduler = new DagScheduler<this>({ maxReplans: 8 });
@@ -306,6 +433,17 @@ export class AgentPipeline {
           },
         };
       }
+      case 'precheck': {
+        // 经验闭环插入的预校核节点：轻量跑一次抗震校核，提前暴露违规
+        return {
+          id: spec.id,
+          label: spec.label,
+          deps: spec.deps,
+          run: async () => {
+            await this.runPrecheck();
+          },
+        };
+      }
       case 'economist': {
         return {
           id: spec.id,
@@ -329,6 +467,32 @@ export class AgentPipeline {
           },
         };
       }
+    }
+  }
+
+  /**
+   * 经验闭环插入的预校核节点执行器：对候选方案轻量跑一次抗震校核，
+   * 把违规提前暴露在选型阶段（而非拖到 Code 才挑刺）。零幻觉——直接用工具，
+   * 不经过 LLM；不写 codeChecks（不干扰主流程），只写可见日志。
+   */
+  private async runPrecheck(): Promise<void> {
+    const schemeIds = this.candidateSchemes.map((s) => s.id);
+    for (const id of schemeIds) {
+      const result = executeToolByName('check_seismic_requirements', {
+        systemId: id,
+        params: { ...this.params },
+      }) as { failCount?: number } | undefined;
+      const fail = (result?.failCount ?? 0) > 0;
+      const name = this.candidateSchemes.find((s) => s.id === id)?.name || id;
+      this.actionLog.push({
+        step: this.actionLog.length + 1,
+        type: 'think',
+        agent: 'code',
+        content: fail
+          ? `[预校核] ${name}：提前发现潜在抗震违规，已暴露在选型阶段（经验闭环生效）`
+          : `[预校核] ${name}：抗震预校核通过`,
+        timestamp: Date.now(),
+      });
     }
   }
 
@@ -550,7 +714,7 @@ export class AgentPipeline {
           feedback +
           '\n\n请重新选型：优先选择能通过上述规范校核的候选方案；若某方案确实难以满足，请替换为更合适的结构体系。';
       }
-      const result = await this.engine.run(prompt, 'architect', { appendHistory: !!feedback });
+      const result = await this.engine.run(this.injectPreference(this.injectSummary(prompt)), 'architect', { appendHistory: !!feedback });
 
       // 解析候选方案（从日志中找【最新】的 query_structure_systems 调用结果——
       // 引擎单例下日志跨轮累积，find 首条会拿到重出前的旧候选）
@@ -593,6 +757,9 @@ export class AgentPipeline {
         }
       }
     }
+
+    // 短期记忆：阶段边界压缩（超阈值时提炼事实摘要，注入下一 Agent）
+    await this.compressStage();
   }
 
   /** 第二步：规范校核工程师 */
@@ -604,7 +771,7 @@ export class AgentPipeline {
       const prompt = buildAgentPrompt('code', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 check_seismic_requirements 和 check_fire_requirements 工具进行规范校核，给出逐条判定和条文依据。';
-      const result = await this.engine.run(prompt, 'code');
+      const result = await this.engine.run(this.injectSummary(prompt), 'code');
 
       // 尝试从日志中提取 codeChecks（getActionLog 返回引擎全量日志，按工具名精确筛选不受前段影响）
       const allLogs = this.engine.getActionLog();
@@ -688,6 +855,9 @@ export class AgentPipeline {
         this.conclusions.push(conclusionEntry.content);
       }
     }
+
+    // 短期记忆：阶段边界压缩
+    await this.compressStage();
   }
 
   /** 第三步：经济评估工程师 */
@@ -699,7 +869,7 @@ export class AgentPipeline {
       const prompt = buildAgentPrompt('economist', this.params) +
         `\n\n候选方案：${this.candidateSchemes.map((s) => `${s.name}（${s.id}）`).join('、')}\n` +
         '\n请对每个候选方案逐一调用 estimate_cost、estimate_schedule、estimate_precast_rate、estimate_carbon、assess_construction_risk 工具进行经济与绿色指标评估。';
-      const result = await this.engine.run(prompt, 'economist');
+      const result = await this.engine.run(this.injectSummary(prompt), 'economist');
 
       // 匹配 metrics：用 toolCallId 精确配对「systemId + toolName → result」，
       // 避免调用交错或某次结果缺失导致错位（fallback：按顺序 index）
@@ -752,6 +922,9 @@ export class AgentPipeline {
         this.conclusions.push(conclusionEntry.content);
       }
     }
+
+    // 短期记忆：阶段边界压缩
+    await this.compressStage();
   }
 
   /** 第四步：总工评审 */
@@ -809,7 +982,7 @@ export class AgentPipeline {
         '\n6. 下一步优化建议' +
         // P1-1：把最终裁定权交还给总工 Agent（此前它的结论只被用来当文案，推荐方案由评分 argmax 决定）
         + DECISION_BLOCK_INSTRUCTION;
-      const result = await this.engine.run(prompt, 'chief');
+      const result = await this.engine.run(this.injectSummary(prompt), 'chief');
 
       // 从日志中提取 compare_schemes 结果
       const compareLog = this.engine.getActionLog().find(

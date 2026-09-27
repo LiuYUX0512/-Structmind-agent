@@ -51,8 +51,9 @@ interface AgentConfigPanelProps {
     model: string;
     apiKey: string;
     mode: 'auto' | 'real' | 'demo';
+    compressThreshold: number;
   };
-  onSave: (config: { apiBase: string; model: string; apiKey: string; mode: 'auto' | 'real' | 'demo' }) => void;
+  onSave: (config: { apiBase: string; model: string; apiKey: string; mode: 'auto' | 'real' | 'demo'; compressThreshold: number }) => void;
 }
 
 function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPanelProps) {
@@ -80,6 +81,7 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
         model: localConfig.model || undefined,
         apiKey: localConfig.apiKey || undefined,
         mode: localConfig.mode === 'demo' ? 'trace' : 'real',
+        compressThreshold: localConfig.compressThreshold,
       });
     } catch (e) {
       logger.warn('保存引擎配置失败:', String(e));
@@ -264,6 +266,29 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
                 </Badge>
               )}
             </div>
+          </div>
+
+          {/* 记忆压缩阈值（现场演示：调到 800 立即触发上下文压缩） */}
+          <div className="space-y-1.5">
+            <Label htmlFor="compress-threshold" className="text-xs font-medium flex items-center gap-1.5">
+              <Eye className="size-3 text-muted-foreground" />
+              记忆压缩阈值（token）
+            </Label>
+            <Input
+              id="compress-threshold"
+              type="number"
+              min={100}
+              max={100000}
+              value={localConfig.compressThreshold}
+              onChange={(e) =>
+                setLocalConfig({ ...localConfig, compressThreshold: Number(e.target.value) || 4000 })
+              }
+              className="font-mono text-xs"
+            />
+            <p className="text-[10px] text-muted-foreground">
+              单 Agent 轨迹估算 token 超过此值即自动压缩为事实摘要。现场演示可调到
+              <span className="text-teal"> 800</span>，观察「[Memory] 检测到上下文过长，已自动压缩」的动态过程。
+            </p>
           </div>
 
           {/* 模式说明 */}

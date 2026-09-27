@@ -21,6 +21,22 @@ export {
   type IDagSchedulerOptions,
 } from './dag-engine';
 export { Planner, type IPlanNodeSpec, type IPlanContext, type PlanNodeKind } from './planner';
+export {
+  MemorySystem,
+  RuleCompressor,
+  LlmCompressor,
+  BagOfWordsEmbedder,
+  estimateTokens,
+  tokenize,
+  matchesConditions,
+  type IEmbedder,
+  type ICompressor,
+  type IPreference,
+  type IExperience,
+  type IExperienceCondition,
+  type IMemoryTriggerContext,
+  type IMemoryEvent,
+} from './memory';
 export { IntentEngine, processAgentMessage, parseIntentByRules } from './intent';
 export type { IConversationContext } from './intent';
 export { RealEngine, saveEngineConfig, loadEngineConfig, isRealModeAvailable } from './real-engine';

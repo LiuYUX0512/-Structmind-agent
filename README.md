@@ -77,10 +77,50 @@ flowchart TB
 
 两种模式在默认模板下输出**逐字段一致**（影子并行保证，见 `scripts/verify-dag.ts`）。
 
+### 主动式记忆系统（模块②）
+
+让 Agent「会思考、有记忆、能进化」——不是被动 RAG，而是主动注入、闭环激活。
+
+```mermaid
+flowchart LR
+  subgraph MEM["记忆系统 memory.ts（scopedStorage 持久化）"]
+    SHORT["短期记忆<br/>compress() 事件驱动压缩"]
+    LONG["长期记忆<br/>偏好库 + 词频向量"]
+    EXP["经验记忆<br/>失败案例 + 策略反思"]
+  end
+
+  subgraph EXEC["执行层"]
+    START["runAgentPipeline 启动"] --> SCAN["① 扫描参数，主动命中偏好"]
+    SCAN --> PLAN["Planner.buildPlan"]
+    EXP -.③ 闭环激活：修改 DAG 拓扑.-> PLAN
+    PLAN --> NODES["DAG 节点序列"]
+    NODES --> COMP["② 节点间：超阈值 → compress"]
+    COMP -.事实摘要注入下一节点.-> NODES
+  end
+
+  SCAN --> LONG
+  COMP --> SHORT
+  NODES -.Chief 反思.-> EXP
+
+  style MEM fill:#f0fdf4
+  style EXEC fill:#eef6ff
+```
+
+**记忆如何影响决策**（三个真实代码路径）：
+
+| 子系统 | 触发点 | 影响方式 | 可见化 |
+|---|---|---|---|
+| 短期记忆 | Agent 轨迹超 `compressThreshold`（默认 4000，UI 可调到 800 演示） | LLM（real）/规则（trace）提炼 3~5 条事实摘要，注入下一 Agent prompt | `[Memory] 检测到上下文过长，已自动压缩…` |
+| 长期记忆 | 启动时 `scanPreferences(params)` | 词频向量余弦检索命中偏好 → 主动拼接「⚠️ 记忆提示」到 Architect 选型 prompt；运行结束自动提炼一句偏好存库 | `[Memory] 已注入历史偏好：…` |
+| 经验记忆 | 启动时 `recallExperiences(ctx)` | 命中经验（`trigger` 纯函数）→ Planner 真实修改 DAG 拓扑（如 Architect 后插入抗震预校核节点） | `[Memory] 触发经验闭环：…` |
+
+> 零重依赖：词频向量（1-gram + 2-gram）+ 余弦相似度存 localStorage，`IEmbedder` 接口保留，未来可无缝替换真 embedding RAG。
+
 ### 设计要点
 
 - **大模型只做"调度员/翻译官"**：意图解析、自然语言问答由 LLM 完成；**所有数值计算（内力估算、配筋率、挠度、碳排系数）由确定性规则引擎执行**，杜绝大模型幻觉导致的"拍脑袋算结构"。
 - **规划与执行分离**：`planner.ts` 只输出计划拓扑（节点 + 依赖 + 条件），`pipeline.ts` 绑定执行器，`dag-engine.ts` 负责拓扑调度、条件跳过与递归重规划——替代旧版写死的四阶段顺序。
+- **依赖图诚实**：DAG 重规划时动态重定向下游节点的 `deps`（`redirects`），杜绝读到废弃中间结果。
 - **规范校核走硬逻辑**：抗震等级、位移角限值、耐火极限等判定基于结构化规则表（if-else 规则引擎），不依赖向量检索的模糊匹配。
 - **完整推理轨迹可溯源**：`trace-engine.ts` 记录每个 Agent 的思考、判定依据、引用的规范条款与计算过程，界面以时间线形式呈现，评审可见"为什么是这个结论"。
 - **反思 + 迭代回环**：总工评审会对推荐结果进行自我质疑（风险点、触发重算条件），体现真正的 Agent 决策回路而非一次性输出。
@@ -120,7 +160,7 @@ npm run build:local
 node scripts/build-gh-pages.mjs
 ```
 
-### 回归验证（七套，共 274 项断言）
+### 回归验证（八套，共 300 项断言）
 
 ```bash
 npm run typecheck            # TypeScript 类型检查
@@ -130,7 +170,8 @@ npm run verify:norm          # 规范判定层（30 项）
 npm run verify:domain        # 领域模型（22 项）
 npm run verify:decision      # 决策裁定层（24 项）
 npm run verify:counterfactual # 反事实推演（45 项）
-npm run verify:dag           # DAG 引擎：static/dynamic 逐字段一致（12 项）
+npm run verify:dag           # DAG 引擎：static/dynamic 逐字段一致（15 项）
+npm run verify:memory        # 记忆系统：压缩/偏好/经验闭环（23 项）
 npm run verify:entry         # 真实模式管线（13 项）
 npm run verify:agentic       # 专项：回退闭环/乱序/人类在环等（128 项）
 ```
@@ -148,6 +189,7 @@ src/
 ├── agent/                # ★ 多 Agent 智能体核心（本作品创新点）
 │   ├── dag-engine.ts     # DAG 执行引擎：拓扑调度/条件跳过/递归重规划（模块①）
 │   ├── planner.ts        # Planner：生成 DAG 任务计划（规划/执行分离）
+│   ├── memory.ts         # 主动式记忆系统：短期压缩/长期偏好/经验闭环（模块②）
 │   ├── intent.ts         # 意图理解 Agent：参数解析/补全/模式识别
 │   ├── pipeline.ts       # 管线入口：static（旧四阶段）/ dynamic（DAG）双模式
 │   ├── real-engine.ts    # 真实模式推理引擎：function calling 循环

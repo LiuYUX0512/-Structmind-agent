@@ -439,6 +439,47 @@ export class RealEngine {
   getActionLog(): IAgentActionLog[] {
     return [...this.actionLog];
   }
+
+  /**
+   * 独立无状态摘要请求（供记忆系统短期压缩使用）。
+   * 关键隔离（对应模块②决策 2）：绝对不复用 this.messages（避免把压缩过程混进
+   * 主 Agent 对话、污染上下文），也不写回 this.actionLog（摘要不是执行轨迹）。
+   * 仅复用 endpoint / apiKey / model 配置，独立发起一次性请求，不带 tools。
+   */
+  async summarize(text: string, instruction: string): Promise<string> {
+    if (!this.config.endpoint || !this.config.apiKey) {
+      throw new Error('未配置 API Endpoint 或 API Key，无法执行摘要压缩');
+    }
+    const isProxy = this.config.endpoint.startsWith('/');
+    const targetUrl = isProxy ? this.config.endpoint : `${this.config.endpoint}/chat/completions`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (!isProxy && this.config.apiKey) {
+      headers.Authorization = `Bearer ${this.config.apiKey}`;
+    }
+    const body = JSON.stringify({
+      model: this.config.model,
+      messages: [
+        { role: 'system', content: instruction },
+        { role: 'user', content: text },
+      ],
+      temperature: 0.2,
+      stream: false,
+      // 不传 tools：纯文本摘要，禁止工具调用
+    });
+
+    const maxRetries = this.config.retryMax ?? 2;
+    const baseDelay = this.config.retryBaseDelayMs ?? 800;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const resp = await this.requestLLM(targetUrl, headers, body);
+        return resp.content || '';
+      } catch (e) {
+        if (!this.isRetryableError(e) || attempt >= maxRetries) throw e;
+        await new Promise((r) => setTimeout(r, baseDelay * (attempt + 1)));
+      }
+    }
+    throw new Error('摘要请求失败：重试次数已用尽');
+  }
 }
 
 /** 检查是否配置了真实模式所需的参数 */
