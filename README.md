@@ -245,6 +245,16 @@ src/
 └── lib/                  # 工具函数
 ```
 
+## 🎨 设计系统
+
+- **5 色语义板**：`primary #0F4C81`（权威/关键数字）、`teal #12A5B5`（AI/记忆/元认知）、`amber #E8930C`（警示/成就/回退）+ 功能色 `success`/`destructive`/`warning`（规范校核三态）。Agent 身份色（architect/code/economist/chief）另立一族，禁止挪用。
+- **5 级字体**：`text-display`（展示）/ `text-title`（标题）/ `text-body`（正文）/ `text-caption`（辅助）/ `text-hero-number`（数字英雄级，等宽 tabular-nums，用于造价/工期/置信度）。
+- **8pt 语义间距**：`--spacing-element(8px)` / `--spacing-card(24px)` / `--spacing-section(48px)`，对应 `p-element`/`p-card`/`gap-section` 等语义类。
+- **玻璃拟态**：`glass-card`（弥散阴影 + `backdrop-blur(20px) saturate(130%) brightness(1.02)` + 内层顶边高光 + hover 上升 2px）。
+- **能力雷达**：Hero 右侧六边形雷达，六大能力分值绑定本次运行真实指标（DAG 节点数/记忆命中/反思条数/硬计算密度/Agent 激活数/条文占比），悬停展示分值来源。
+- **DAG 电影模式**：15 秒全屏演示（真实回放/高光演示双模式 + 同步字幕 + 进度条 + 键盘导航）。
+- **无障碍**：`prefers-reduced-motion` 降级、全局 amber 焦点环、`@media print` 打印样式、`data-presentation` 大屏模式（1.5 倍字号）。
+
 ## ⚠️ 免责声明
 
 本工具的计算基于经验公式与简化假定，仅用于**方案前期概念比选与决策参考，不构成设计依据**。实际工程设计必须由注册结构工程师主持，采用专业结构分析软件（PKPM/YJK 等）按现行国家标准逐项复核。系统内置 Human-in-the-loop 理念：最终决策权始终在持证工程师手中，AI 仅提供量化建议。
