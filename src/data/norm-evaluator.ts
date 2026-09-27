@@ -343,12 +343,10 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
   const height = resolveBuildingHeight(params);
 
   const driftEstimate = estimateDriftRatio(schemeId, intensity, height, params.soilCategory);
-  const driftLimit = getDriftLimit(schemeId);
-  const swrMin = getShearWeightRatioMin(schemeId, intensity);
   const swr = estimateSeismicShearCoefficient(schemeId, params);
   const torsion = estimateTorsionPeriodRatio(schemeId, params, height);
-  const periodLimit = height > 150 ? 0.85 : 0.9;
-  const heightLimit = getHeightLimit(schemeId, intensity);
+  // 注：各项限值不再在此处预取，改由规则自带的可执行 threshold 在判定时现取（见下），
+  // 避免「预取变量」与「条文声明」两处并存再度产生漂移。
 
   const ctx: IRuleContext = {
     schemeId,
@@ -364,14 +362,20 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
   for (const rule of RULE_REGISTRY) {
     if (!rule.appliesTo(ctx)) continue;
 
+    // P1-2：限值一律取自规则自带的可执行 threshold —— 判定用的限值
+    // 与条文原文、适用条件同源，杜绝「条文说 A、判定用 B」的漂移。
+    // 少数规则（构造措施）无唯一数值限值，threshold.value 返回 null，走专门分支。
+    const declLimit = rule.threshold.value(ctx);
+
     switch (rule.id) {
       case 'drift': {
+        const driftLimit = declLimit ?? getDriftLimit(schemeId);
         const v = judge(rule.severity, driftEstimate, driftLimit, true);
         checks.push({
           name: rule.name,
           status: v.status,
           value: `1/${Math.round(1 / driftEstimate)}`,
-          requirement: `≤ 1/${Math.round(1 / driftLimit)}`,
+          requirement: rule.threshold.describe(ctx),
           description:
             v.status === 'fail'
               ? '层间位移角超出规范限值，需调整结构布置或增大刚度'
@@ -396,6 +400,7 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
       }
 
       case 'swr': {
+        const swrMin = declLimit ?? getShearWeightRatioMin(schemeId, intensity);
         const v = judge(rule.severity, swr.lambda, swrMin, false);
         const pct = (swr.lambda * 100).toFixed(2);
         const minPct = (swrMin * 100).toFixed(1);
@@ -403,7 +408,7 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
           name: rule.name,
           status: v.status,
           value: `${pct}%`,
-          requirement: `≥ ${minPct}%（${intensity}度设防）`,
+          requirement: rule.threshold.describe(ctx),
           description:
             v.status === 'fail'
               ? '楼层地震剪力系数低于规范最小值，需按规范调整地震作用或优化结构布置'
@@ -428,12 +433,13 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
       }
 
       case 'period': {
+        const periodLimit = declLimit ?? (height > 150 ? 0.85 : 0.9);
         const v = judge(rule.severity, torsion.ratio, periodLimit, true);
         checks.push({
           name: rule.name,
           status: v.status,
           value: torsion.ratio.toFixed(2),
-          requirement: `≤ ${periodLimit}（${height > 150 ? 'B级高度' : 'A级高度'}）`,
+          requirement: rule.threshold.describe(ctx),
           description:
             v.status === 'fail'
               ? '周期比超出规范限值，结构扭转效应显著，需调整抗侧力构件布置'
@@ -458,12 +464,13 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
       }
 
       case 'height': {
-        const v = judge(rule.severity, height, heightLimit, true);
+        const hLimit = declLimit ?? getHeightLimit(schemeId, intensity);
+        const v = judge(rule.severity, height, hLimit, true);
         checks.push({
           name: rule.name,
           status: v.status,
           value: `${height} m`,
-          requirement: `≤ ${heightLimit} m（${intensity}度）`,
+          requirement: rule.threshold.describe(ctx),
           description:
             v.status === 'fail'
               ? '建筑高度超出该体系规范最大适用高度，属于超限工程，需进行超限抗震设防专项审查'
@@ -472,25 +479,27 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
             basis: rule.source,
             input: `结构体系 ${schemeId}、${intensity}度设防、建筑高度 ${height}m`,
             formula: 'H ≤ H_max(结构体系, 设防烈度)',
-            result: `${height}m ${height <= heightLimit ? '≤' : '>'} ${heightLimit}m`,
+            result: `${height}m ${height <= hLimit ? '≤' : '>'} ${hLimit}m`,
           },
           clauseText: rule.clauseText,
           source: rule.source,
           severity: rule.severity,
           reason:
             v.status === 'fail'
-              ? `建筑高度 ${height}m 超出规范适用最大高度 ${heightLimit}m（${intensity}度），已属超限高层范畴。该体系在本工程高度下不再适用，必须换用适用高度更高的结构体系，或按 GB 55002-2021 规定组织超限工程抗震设防专项审查。`
+              ? `建筑高度 ${height}m 超出规范适用最大高度 ${hLimit}m（${intensity}度），已属超限高层范畴。该体系在本工程高度下不再适用，必须换用适用高度更高的结构体系，或按 GB 55002-2021 规定组织超限工程抗震设防专项审查。`
               : v.nearLimit
-                ? `建筑高度 ${height}m 接近规范适用最大高度 ${heightLimit}m（${intensity}度），余量不足 10%，设计中应关注整体稳定与侧向刚度。`
-                : `建筑高度 ${height}m ≤ 规范适用最大高度 ${heightLimit}m（${intensity}度），属于常规适用范围，无需超限专项论证。`,
+                ? `建筑高度 ${height}m 接近规范适用最大高度 ${hLimit}m（${intensity}度），余量不足 10%，设计中应关注整体稳定与侧向刚度。`
+                : `建筑高度 ${height}m ≤ 规范适用最大高度 ${hLimit}m（${intensity}度），属于常规适用范围，无需超限专项论证。`,
         });
         break;
       }
 
       case 'axial_ratio': {
         const grade = estimateSeismicGrade(intensity, height);
+        // P1-2：限值取自规则阈值声明（与 estimateSeismicGrade 同源），不再本地硬编码映射
         const limitValue =
-          grade.grade === 'grade1_9' ? 0.4 : grade.grade === 'grade1_78' ? 0.5 : 0.6;
+          declLimit ??
+          (grade.grade === 'grade1_9' ? 0.4 : grade.grade === 'grade1_78' ? 0.5 : 0.6);
         const bands: Record<string, { min: number; max: number }> = {
           grade1_9: { min: 0.35, max: 0.42 },
           grade1_78: { min: 0.4, max: 0.48 },
@@ -506,7 +515,7 @@ export function evaluateCompliance(schemeId: string, params: IProjectParams): IN
           name: rule.name,
           status,
           value: estimated,
-          requirement: `≤ ${limitValue.toFixed(2)}（底部加强部位，${grade.label}）`,
+          requirement: `${rule.threshold.describe(ctx)}（${grade.label}）`,
           description:
             status === 'fail'
               ? '墙肢轴压比超出限值，需加大墙肢截面或提高混凝土强度等级'

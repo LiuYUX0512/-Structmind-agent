@@ -1,16 +1,21 @@
-// 规范规则层（声明式）
-// 职责边界：只描述「判什么、依据哪条、适用条件、限值来源、条文原文」，不做数值估算。
+// 规范规则层（声明式）—— 规范知识图谱的**唯一数据源**
+// 职责边界：只描述「判什么、依据哪条、适用条件、限值来源、条文原文、可执行限值」，不做数值估算。
 // 数值估算与判定求值在 norm-evaluator.ts。
 //
-// 设计要点（对应架构诊断 P0-1）：
+// 设计要点（对应架构诊断 P0-1 / P1-2）：
 // 1. severity 决定超限时的判定等级 —— 强制性条文超限必须是 fail，不允许降级为 warning；
-// 2. 条文原文在此处单一数据源（原 structure.ts 的 clauseTemplates 已迁入）；
+// 2. **条文原文在此处单一数据源**（原 structure.ts 的 clauseTemplates 已迁入）；
+//    P1-2 把 code-knowledge.ts 的重复条文库也收编为本表的投影，消除双源漂移。
 // 3. 未知结构体系不再静默兜底（|| 默认值），由求值器显式报错。
-// EXPORTS: IRuleSeverity, ICodeRule, RULE_REGISTRY,
+// 4. **可执行限值 threshold**：每条规则自带「怎么取值」的求值函数，
+//    输出「条文原文 + 适用条件 + 判定限值」三元组，使条文与判定永不脱钩。
+//
+// EXPORTS: IRuleSeverity, ICodeRule, IThresholdSpec, RULE_REGISTRY,
 //          DRIFT_LIMITS, SHEAR_WEIGHT_RATIO_MIN, HEIGHT_LIMITS, AXIAL_RATIO_LIMITS,
 //          ALPHA_MAX, CHAR_PERIOD_TG, PERIOD_COEFF, PERIOD_RATIO_BASE,
 //          getHeightLimit, getDriftLimit, getShearWeightRatioMin, getPeriodCoeff,
-//          getPeriodRatioBase, getAlphaMax, getCharPeriod, isKnownSystem
+//          getPeriodRatioBase, getAlphaMax, getCharPeriod, isKnownSystem,
+//          listKnownSystemIds, calculateBuildingHeight
 
 import type { IProjectParams } from './structure';
 
@@ -37,11 +42,37 @@ export interface IRuleContext {
   aspectRatio: number;
 }
 
-/** 声明式规范规则（不含求值逻辑） */
+/**
+ * 可执行限值规格：把「这条规则的限值怎么算」也声明在规则上，而不是散落在求值器里。
+ * 输出三元组的第三元（判定限值），与 clauseText（条文原文）、appliesTo（适用条件）配套。
+ */
+export interface IThresholdSpec {
+  /** 限值是否在单条规则内可直接求值（false = 需体系/烈度组合，见 thresholdNote） */
+  resolvable: boolean;
+  /**
+   * 求值函数：给定上下文返回本规则在本方案下的限值（与实测值的比较基准）。
+   * 返回 null 表示本规则不适用数值判定（如纯构造措施要求）。
+   */
+  value: (ctx: IRuleContext) => number | null;
+  /** 比较方向：'max' = 实测值不得超过限值；'min' = 实测值不得低于限值 */
+  direction: 'max' | 'min';
+  /** 限值的人读描述（用于「要求」列，如「≤ 1/550」「≥ 4.8%（8度设防）」） */
+  describe: (ctx: IRuleContext) => string;
+  /** 取值依据说明（如「按 8 度设防取表 5.2.5」） */
+  note?: string;
+}
+
+/** 声明式规范规则（不含数值估算；含可执行限值） */
 export interface ICodeRule {
   id: string;
   /** 校核项名称（对外展示，与 UI / 回归用例契约一致，禁止随意改动） */
   name: string;
+  /**
+   * 条文正式名称（面向报告「条文依据」栏展示，贴合规范用语）。
+   * 与 name 的区别：name 是界面/回归用的短标签（如「高度适用范围」），
+   * clauseTitle 是规范条文自身的名称（如「现浇钢筋混凝土房屋的最大适用高度」）。
+   */
+  clauseTitle: string;
   /** 标准编号 */
   code: string;
   /** 条文号 */
@@ -54,6 +85,13 @@ export interface ICodeRule {
   appliesTo: (ctx: IRuleContext) => boolean;
   /** 完整出处 */
   source: string;
+  /**
+   * 规则 key 别名（与旧 code-knowledge.ts 的 ruleKeys 对齐，供 resolveKnowledgeBasis 兼容）。
+   * 保留它是为了不破坏既有调用方（tools.ts 按这些 key 取条文依据）。
+   */
+  ruleKeys: string[];
+  /** 可执行限值：条文与判定不脱钩的关键（P1-2） */
+  threshold: IThresholdSpec;
 }
 
 // ============ 基础几何 ============
@@ -290,6 +328,7 @@ export const RULE_REGISTRY: ICodeRule[] = [
   {
     id: 'drift',
     name: '层间位移角',
+    clauseTitle: '弹性层间位移角限值',
     code: 'GB/T 50011-2010（2024年局部修订）',
     clause: '表 5.5.1',
     clauseText:
@@ -297,10 +336,19 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'mandatory',
     source: 'GB/T 50011-2010（2024年局部修订）表 5.5.1 弹性层间位移角限值；GB 55002-2021 第 5.1.1 条',
     appliesTo: () => true,
+    ruleKeys: ['drift'],
+    threshold: {
+      resolvable: true,
+      direction: 'max',
+      value: (ctx) => getDriftLimit(ctx.schemeId),
+      describe: (ctx) => `≤ 1/${Math.round(1 / getDriftLimit(ctx.schemeId))}`,
+      note: '按结构体系取表 5.5.1 对应限值',
+    },
   },
   {
     id: 'swr',
     name: '剪重比',
+    clauseTitle: '楼层最小地震剪力系数（剪重比）',
     code: 'GB 55002-2021 / GB/T 50011-2010',
     clause: '第 4.2.3 条 / 表 5.2.5',
     clauseText:
@@ -308,10 +356,19 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'mandatory',
     source: 'GB 55002-2021 第 4.2.3 条（强制性）；GB/T 50011-2010（2024年局部修订）表 5.2.5',
     appliesTo: () => true,
+    ruleKeys: ['swr'],
+    threshold: {
+      resolvable: true,
+      direction: 'min',
+      value: (ctx) => getShearWeightRatioMin(ctx.schemeId, ctx.intensity),
+      describe: (ctx) => `≥ ${(getShearWeightRatioMin(ctx.schemeId, ctx.intensity) * 100).toFixed(1)}%（${ctx.intensity}度设防）`,
+      note: '框架结构按表 5.2.5 取整；其他体系为框架的 2/3',
+    },
   },
   {
     id: 'period',
     name: '周期比 Tt/T1',
+    clauseTitle: '结构扭转周期比限值',
     code: 'JGJ 3-2010',
     clause: '第 3.4.5 条',
     clauseText:
@@ -319,10 +376,20 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'general',
     source: 'JGJ 3-2010《高层建筑混凝土结构技术规程》第 3.4.5 条',
     appliesTo: () => true,
+    ruleKeys: ['period'],
+    threshold: {
+      resolvable: true,
+      direction: 'max',
+      // B级高度（>150m）限值 0.85，A级 0.90 —— 与求值器内 periodLimit 口径一致
+      value: (ctx) => (ctx.height > 150 ? 0.85 : 0.9),
+      describe: (ctx) => `≤ ${ctx.height > 150 ? 0.85 : 0.9}（${ctx.height > 150 ? 'B级高度' : 'A级高度'}）`,
+      note: 'B级高度（>150m）取 0.85，A级取 0.90',
+    },
   },
   {
     id: 'height',
     name: '高度适用范围',
+    clauseTitle: '现浇钢筋混凝土房屋的最大适用高度',
     code: 'GB/T 50011-2010（2024年局部修订）',
     clause: '表 6.1.1 / 表 8.1.1 / 表 7.1.2',
     clauseText:
@@ -330,10 +397,19 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'mandatory',
     source: 'GB/T 50011-2010（2024年局部修订）表 6.1.1 最大适用高度',
     appliesTo: () => true,
+    ruleKeys: ['height', 'max_height'],
+    threshold: {
+      resolvable: true,
+      direction: 'max',
+      value: (ctx) => getHeightLimit(ctx.schemeId, ctx.intensity),
+      describe: (ctx) => `≤ ${getHeightLimit(ctx.schemeId, ctx.intensity)} m（${ctx.intensity}度）`,
+      note: '按结构体系 + 设防烈度查最大适用高度表',
+    },
   },
   {
     id: 'axial_ratio',
     name: '抗震墙墙肢轴压比（估算）',
+    clauseTitle: '抗震墙墙肢轴压比限值',
     code: 'GB/T 50011 / GB/T 50010-2010',
     clause: '第 6.4.2 条 / 第 11.7.16 条',
     clauseText:
@@ -341,10 +417,22 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'general',
     source: 'GB/T 50011 第 6.4.2 条；GB/T 50010-2010（2024年局部修订）第 11.7.16 条',
     appliesTo: (ctx) => ctx.schemeId === 'shearwall' || ctx.schemeId === 'frame-shearwall',
+    ruleKeys: ['axial_ratio'],
+    threshold: {
+      resolvable: true,
+      direction: 'max',
+      // 轴压比限值随抗震等级变化：一级(9度)0.4 / 一级(7、8度)0.5 / 二三级0.6
+      // 注：抗震等级由设防烈度 + 高度决定，求值器内已有 estimateSeismicGrade；此处按其等级映射限值。
+      value: (ctx) => estimateAxialRatioLimit(ctx.schemeId, ctx.intensity, ctx.height),
+      describe: (ctx) =>
+        `≤ ${estimateAxialRatioLimit(ctx.schemeId, ctx.intensity, ctx.height).toFixed(2)}（底部加强部位）`,
+      note: '限值随抗震等级变化（一级9度0.40 / 一级7、8度0.50 / 二三级0.60）',
+    },
   },
   {
     id: 'fire_protection',
     name: '防火保护',
+    clauseTitle: '钢结构构件耐火极限要求',
     code: 'GB 55037-2022',
     clause: '表 5.2.1',
     clauseText:
@@ -352,5 +440,38 @@ export const RULE_REGISTRY: ICodeRule[] = [
     severity: 'advisory',
     source: 'GB 55037-2022《建筑防火通用规范》表 5.2.1 构件耐火极限要求',
     appliesTo: (ctx) => ctx.schemeId === 'steel',
+    ruleKeys: ['fire_protection', 'steel_fire'],
+    threshold: {
+      // 提示性措施要求，无数值限值可比（恒 warning），故 resolvable=false
+      resolvable: false,
+      direction: 'max',
+      value: () => null,
+      describe: () => '柱 3.00h / 梁 2.00h（一级耐火等级）',
+      note: '构造措施要求，不参与数值判定',
+    },
   },
 ];
+
+/**
+ * 抗震墙墙肢轴压比限值 —— 由抗震等级决定。
+ * 口径必须与 norm-evaluator 的 estimateSeismicGrade 完全一致（同一判定不许有两套规则）：
+ *   9 度 → 一级 → 0.40；7、8 度且高度 > 80m → 一级 → 0.50；其余 → 二、三级 → 0.60。
+ * 独立成函数便于阈值声明与求值器共用同一口径，避免两处各写一遍而漂移。
+ */
+export function estimateAxialRatioLimit(
+  schemeId: string,
+  intensity: number,
+  height: number
+): number {
+  void schemeId; // 等级仅由「烈度 + 高度」决定，体系不参与（与 estimateSeismicGrade 对齐）
+  if (intensity >= 9) return AXIAL_RATIO_LIMITS.grade1_9;
+  if (intensity >= 7 && height > 80) return AXIAL_RATIO_LIMITS.grade1_78;
+  return AXIAL_RATIO_LIMITS.grade23;
+}
+
+/** 判定给定轴压比限值属于哪个抗震等级（与 estimateSeismicGrade 同源） */
+export function axialRatioGradeLabel(intensity: number, height: number): string {
+  if (intensity >= 9) return '一级（9度）';
+  if (intensity >= 7 && height > 80) return '一级（7/8度）';
+  return '二、三级';
+}

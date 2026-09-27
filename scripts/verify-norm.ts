@@ -15,6 +15,7 @@ import {
   type INormCheckItem,
 } from '../src/data/structure';
 import { RULE_REGISTRY } from '../src/data/code-rules';
+import { CODE_KNOWLEDGE, resolveKnowledgeBasis } from '../src/data/code-knowledge';
 import { executeToolByName } from '../src/agent/tools';
 
 const checks: Array<[string, boolean, string]> = [];
@@ -208,6 +209,107 @@ const pick = (items: INormCheckItem[], kw: string) =>
     fails2.length < fails.length,
     `frame=${fails.length} 项 vs shearwall=${fails2.length} 项`
   );
+}
+
+// ---------- 场景 G：规范知识图谱化（P1-2）----------
+// 核心守护点：条文与限值必须**同源**。
+// 旧实现里 code-knowledge.ts 与 code-rules.ts 各存一份条文，已经实际漂移
+// （剪重比 6/7 度限值、钢结构防火条文号两处矛盾）。以下断言锁死单一数据源。
+{
+  // G1：规则层必须自带可执行限值声明
+  push(
+    'G1 每条规则都有可执行 threshold 声明',
+    RULE_REGISTRY.every((r) => r.threshold && typeof r.threshold.value === 'function'),
+    `带阈值=${RULE_REGISTRY.filter((r) => r.threshold?.value).length}/${RULE_REGISTRY.length}`
+  );
+
+  // G2：知识库是规则层的投影，不是独立副本 —— 条数、条文号、原文必须逐条一致
+  const misaligned = RULE_REGISTRY.filter((rule) => {
+    const entry = CODE_KNOWLEDGE.find((e) => e.id === rule.id);
+    if (!entry) return true;
+    return entry.clause !== rule.clause || entry.text !== rule.clauseText;
+  }).map((r) => r.id);
+  push(
+    'G2 知识库条文与规则层逐条一致（单一数据源，杜绝漂移）',
+    misaligned.length === 0,
+    misaligned.length === 0 ? `对齐 ${CODE_KNOWLEDGE.length} 条` : `漂移条目=${misaligned.join('、')}`
+  );
+
+  // G3：剪重比限值在「条文原文」与「可执行阈值」中必须给出同一组数字
+  // 旧双源实现此处就是矛盾的：knowledge 写 7度 0.012，规则表写 7度框架 0.024
+  const swrRule = RULE_REGISTRY.find((r) => r.id === 'swr');
+  const swrCtx = {
+    schemeId: 'frame',
+    params: baseParams,
+    intensity: 7,
+    height: 90,
+    period: 1.5,
+    aspectRatio: 2,
+  };
+  const swrDeclared = swrRule?.threshold.value(swrCtx) ?? 0;
+  const swrInText = /7度\(0\.10g\)\s*([\d.]+)/.exec(swrRule?.clauseText ?? '')?.[1];
+  push(
+    'G3 剪重比：条文原文的数字与可执行阈值一致',
+    swrInText != null && Number(swrInText) === swrDeclared,
+    `条文=${swrInText}，阈值=${swrDeclared}`
+  );
+
+  // G4：判定实际使用的限值 = 规则声明的限值（防线必须真的开火）
+  // 用「条文限值」反推期望判定：7度框架 90m 高柔结构剪重比应不足（≥2.4%）
+  const r7 = calculateNormCompliance('frame', {
+    ...baseParams,
+    floors: 30,
+    buildingHeight: 90,
+    seismicIntensity: '7',
+  });
+  const swr7 = pick(r7.checks, '剪重比');
+  const swr7Limit = (swrRule?.threshold.describe(swrCtx) ?? '').replace(/[^\d.]/g, '');
+  push(
+    'G4 判定「要求」列直接来自规则阈值声明（判定与条文同源）',
+    !!swr7?.requirement && swr7.requirement.includes(swr7Limit.slice(0, 3)),
+    `requirement=${swr7?.requirement}`
+  );
+
+  // G5：resolveKnowledgeBasis 仍按 ruleKeys + 体系命中（既有调用方契约不破）
+  const basisHeight = resolveKnowledgeBasis('frame', ['max_height']);
+  push(
+    'G5 条文依据解析：max_height 对框架命中高度规则',
+    basisHeight.some((b) => b.id === 'height'),
+    `命中=${basisHeight.map((b) => b.id).join('、') || '无'}`
+  );
+
+  // G6：体系限定生效 —— 轴压比只对含抗震墙体系命中，不对纯框架命中
+  const basisAxialWall = resolveKnowledgeBasis('shearwall', ['axial_ratio']);
+  const basisAxialFrame = resolveKnowledgeBasis('frame', ['axial_ratio']);
+  push(
+    'G6 体系限定生效：轴压比命中剪力墙、不命中框架',
+    basisAxialWall.length > 0 && basisAxialFrame.length === 0,
+    `shearwall=${basisAxialWall.length}，frame=${basisAxialFrame.length}`
+  );
+
+  // G7：知识库投影不再自持条文 —— 修改规则条文应能自动反映到知识库
+  // 结构性保证：CODE_KNOWLEDGE[i].text 与 RULE_REGISTRY[i].clauseText 是同一字符串引用值
+  const sameText = RULE_REGISTRY.every((rule) => {
+    const entry = CODE_KNOWLEDGE.find((e) => e.id === rule.id);
+    return entry?.text === rule.clauseText;
+  });
+  push('G7 知识库文案派生自规则层（派生投影，非人工副本）', sameText, '');
+
+  // G8：每条规则都有条文正式名称，且与界面短标签区分（报告「条文依据」栏可读）
+  const titled = RULE_REGISTRY.every(
+    (r) => !!r.clauseTitle && r.clauseTitle.length >= 6 && r.clauseTitle !== r.name
+  );
+  push(
+    'G8 每条规则都有条文正式名称（区别于界面短标签）',
+    titled,
+    RULE_REGISTRY.map((r) => r.clauseTitle).join(' / ').slice(0, 60) + '…'
+  );
+
+  // G9：报告「条文依据」能按规范用语检索到高度条文（既有 tool 输出契约）
+  const basisTitleHit = resolveKnowledgeBasis('frame', ['max_height']).some((b) =>
+    b.title.includes('最大适用高度')
+  );
+  push('G9 高度条文以规范用语命名（报告可读、可检索）', basisTitleHit, '');
 }
 
 // ---------- 输出 ----------
