@@ -1,9 +1,11 @@
 import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award, Brain, Database, Cpu } from 'lucide-react';
+import { ArrowDown, Sparkles, PenTool, Scale, RefreshCw, Award, Brain, Database, Cpu, PlayCircle } from 'lucide-react';
 import StructureWireframe3D from '@/components/StructureWireframe3D';
 import CountUpOnView from '@/components/CountUpOnView';
+import CapabilityRadar from '@/components/CapabilityRadar';
 import { MOCK_PROJECT_PARAMS, type IProjectParams, type IStructureScheme } from '@/data/structure';
+import type { IAgentActionLog, ITrajectoryMetrics } from '@/agent/types';
 
 interface HeroSectionProps {
   onStart: () => void;
@@ -13,9 +15,15 @@ interface HeroSectionProps {
   scheme?: IStructureScheme | null;
   /** 规范校核结果（3D 违规警示） */
   codeChecks?: Record<string, unknown>;
+  /** 本次运行的 actionLog（能力雷达真实指标来源） */
+  logs?: IAgentActionLog[];
+  /** 元认知轨迹指标 */
+  metrics?: ITrajectoryMetrics;
+  /** 播放 DAG 电影模式 */
+  onPlayMovie?: () => void;
 }
 
-function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) {
+function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPlayMovie }: HeroSectionProps) {
   const features = [
     { icon: PenTool, label: '方案创作', desc: '多体系智能生成', accent: 'primary' },
     { icon: Scale, label: '规范校核', desc: 'GB 55002 · 50011', accent: 'teal' },
@@ -249,6 +257,17 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                 <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
               </button>
 
+              {onPlayMovie && (
+                <button
+                  onClick={onPlayMovie}
+                  className="flex items-center gap-2 rounded-md border border-teal/50 bg-teal/10 px-5 py-3.5 text-base font-semibold text-teal transition-all duration-200 hover:-translate-y-0.5 hover:bg-teal/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber focus-visible:ring-offset-2"
+                  style={{ borderRadius: '4px' }}
+                >
+                  <PlayCircle className="size-5" />
+                  15 秒看懂
+                </button>
+              )}
+
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-xs font-bold text-primary">01</span>
@@ -374,6 +393,16 @@ function HeroSection({ onStart, params, scheme, codeChecks }: HeroSectionProps) 
                   {structureLabel} · {displayParams.floors}F
                 </div>
               </div>
+
+              {/* 能力雷达（本次运行真实指标） */}
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.8, duration: 0.6 }}
+                className="mt-4"
+              >
+                <CapabilityRadar logs={logs ?? []} metrics={metrics} />
+              </motion.div>
 
             {/* 浮动小卡 - 抗震等级 */}
             <motion.div

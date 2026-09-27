@@ -1,3 +1,21 @@
+/*
+ * ============================================================
+ * 色彩语义映射表（设计系统 · 唯一用色权威）
+ * 任何新组件用色前，必须先查本表，禁止随意取色。
+ * ============================================================
+ * primary    #0F4C81  主按钮 / 主标题 / 关键数字 / 权威信息
+ * teal       #12A5B5  AI 相关：记忆 / 元认知 / Agent 动作
+ * amber      #E8930C  警示 / 成就 / 高亮提示：回退 / 反思 / 风险
+ * success    #10B981  规范校核「符合」（功能色，保留，不可改语义）
+ * destructive#EF4444  规范校核「不符合」（功能色，保留，不可改语义）
+ * warning    #F59E0B  一般性提醒（功能色）
+ * ============================================================
+ * 4 级字体体系：text-display（展示）/ text-title（标题）/
+ *               text-body（正文）/ text-caption（辅助）
+ * 8pt 语义间距：--spacing-element(8px) / --spacing-card(24px) / --spacing-section(48px)
+ * 玻璃拟态：glass-card（外层弥散阴影 + 中层 blur + 内层顶边高光 + hover 上升 2px）
+ * ============================================================
+ */
 :root {
   --button-outline: rgba(0,0,0, .10);
   --badge-outline: rgba(0,0,0, .05);
@@ -154,6 +172,11 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* ===== 8pt 语义间距（P0-1：语义化，一眼看出用途）===== */
+  --spacing-element: 0.5rem;   /* 8px  元素内部：图标/徽章间距 */
+  --spacing-card: 1.5rem;      /* 24px 卡片内边距/卡片间距 */
+  --spacing-section: 3rem;     /* 48px 区块间距 */
 
   --shadow-2xs: var(--shadow-2xs);
   --shadow-xs: var(--shadow-xs);
@@ -406,7 +429,7 @@
  
    /* ===== Presentation / 大屏模式 ===== */
    :root[data-presentation='true'] {
-     --pres-scale: 1.25;
+     --pres-scale: 1.5;
    }
    :root[data-presentation='true'] body {
      font-size: calc(1rem * var(--pres-scale));
@@ -433,8 +456,8 @@
      display: none !important;
    }
    :root[data-presentation='true'] .pres-card-pad {
-     padding: 1.75rem;
-     gap: 1.25rem;
+     padding: 2rem;
+     gap: 1.5rem;
    }
    :root[data-presentation='true'] .pres-big-button {
      padding: 1rem 2.25rem;
@@ -600,5 +623,101 @@
     stroke: #22d3ee;
     opacity: 0.95;
     filter: drop-shadow(0 0 6px rgba(34, 211, 238, 0.75));
+  }
+}
+
+/* ============================================================
+ * P0-1 设计系统：4 级字体体系
+ * text-display（展示）/ text-title（标题）/ text-body（正文）/ text-caption（辅助）
+ * ============================================================ */
+@utility text-display {
+  font-size: clamp(2.75rem, 5vw, 4rem);
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+@utility text-title {
+  font-size: clamp(1.25rem, 2vw, 1.5rem);
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@utility text-body {
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  font-weight: 400;
+}
+@utility text-caption {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+
+/* 第 5 级：数字英雄级（造价/工期/置信度/得分等关键数字） */
+@utility text-hero-number {
+  font-family: var(--font-mono);
+  font-size: clamp(48px, 6vw, 72px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* ============================================================
+ * P0-1 设计系统：玻璃拟态卡片（glass-card）
+ * 外层弥散阴影 + 中层半透明 backdrop-blur + 内层顶边高光 + hover 上升 2px
+ * ============================================================ */
+@utility glass-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(130%) brightness(1.02);
+  backdrop-filter: blur(20px) saturate(130%) brightness(1.02);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow:
+    0 24px 48px -24px rgba(15, 76, 129, 0.16),
+    0 2px 8px -2px rgba(15, 76, 129, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  &:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.82);
+    box-shadow:
+      0 32px 64px -28px rgba(15, 76, 129, 0.24),
+      0 6px 16px -6px rgba(15, 76, 129, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  }
+}
+
+/* ============================================================
+ * P0-1 设计系统：无障碍降级
+ * 系统开启「减少动效」时，全站动画/过渡降级为静态
+ * ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+ * P0-1 设计系统：打印样式兜底
+ * 白底、去阴影、去动画、保留配色（print-color-adjust: exact）
+ * 主界面隐藏/报告视图显示由 HomePage 内联 @media print 负责
+ * ============================================================ */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    box-shadow: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+  body {
+    background: #fff !important;
   }
 }

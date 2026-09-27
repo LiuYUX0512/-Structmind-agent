@@ -21,6 +21,7 @@ import SchemesSection from './sections/SchemesSection';
 import ComparisonSection from './sections/ComparisonSection';
 import MetacognitionPanel from '@/components/MetacognitionPanel';
 import MemoryPanel from '@/components/MemoryPanel';
+import DagMovieMode from '@/components/DagMovieMode';
 import { DebatePanel } from '@/components/DebatePanel';
 import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
@@ -198,6 +199,7 @@ export default function HomePage() {
   const [schemes, setSchemes] = useState<IStructureScheme[]>([]);
   const [recommendation, setRecommendation] = useState<IRecommendation | null>(null);
   const [metacognition, setMetacognition] = useState<IAgentPipelineResult['metacognition']>(undefined);
+  const [movieMode, setMovieMode] = useState(false);
   const [chatMessages, setChatMessages] = useState<IChatMessage[]>([]);
   const [selectedSchemeId, setSelectedSchemeId] = useState<string | null>(null);
   const [playerFinished, setPlayerFinished] = useState(false);
@@ -1450,6 +1452,9 @@ ${dis || '- （待补充）'}
           params={projectParams}
           scheme={schemes.find((s) => s.id === selectedSchemeId) || (recommendation ? schemes[0] : null)}
           codeChecks={lastCodeChecks}
+          logs={actionLog}
+          metrics={metacognition?.metrics}
+          onPlayMovie={() => setMovieMode(true)}
         />
          <ParamsSection
            onGenerate={handleGenerate}
@@ -1897,6 +1902,9 @@ ${dis || '- （待补充）'}
            codeChecks={lastCodeChecks}
          />
        </div>
+
+       {/* DAG 电影模式（15 秒全屏演示） */}
+       <DagMovieMode open={movieMode} onClose={() => setMovieMode(false)} />
      </>
    );
  }
