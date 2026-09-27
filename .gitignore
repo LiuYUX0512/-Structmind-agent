@@ -66,3 +66,4 @@ pnpm-lock.yaml
 # 本地验证构建产物（勿入库）
 scripts/verify-out/
 scripts/verify-norm-out/
+scripts/verify-domain-out/

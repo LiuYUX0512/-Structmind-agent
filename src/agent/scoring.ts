@@ -4,6 +4,7 @@
 // 2. 安全 = 抗震60% + 施工难度40%；绿色 = 可持续40% + 碳排35% + 装配率25%；
 // 3. 所有分项 0~10 分，综合分为权重加权平均。
 import type { IStructureScheme, IWeightConfig } from '@/data/structure';
+import { resolveDomainAdjustments } from '@/data/domain-adjustments';
 
 /** 各维度行业典型参考范围（用于固定归一化） */
 export const SCORE_RANGES = {
@@ -39,9 +40,19 @@ export interface ISchemeScoreBreakdown {
   green: number;
   performance: number;
   overall: number;
+  /** 生效的领域调节项（工程经验性调节，非规范强制；用于界面如实标注） */
+  adjustments?: { id: string; name: string; delta: number; basis: string }[];
 }
 
-/** 统一综合评分：对任意方案 + 任意权重，输出唯一确定的 0~10 分及各分项 */
+/**
+ * 统一综合评分：对任意方案 + 任意权重，输出唯一确定的 0~10 分及各分项
+ *
+ * 领域调节（如「高烈度高层住宅优先抗震墙体系」）此前散落在 compare_schemes 与
+ * generateSchemesFromParams 两处硬编码，导致排序分与卡片分不一致。
+ * 现统一由 domain-adjustments.ts 声明、在本函数内应用：
+ * 方案对象携带 evaluatedAt（指标评估时的参数快照）时自动生效，
+ * 保证同一方案在任何调用方（总工排序 / 方案卡片 / 优化器 / 权衡分析）得分一致。
+ */
 export function computeSchemeScore(
   scheme: IStructureScheme,
   weights: IWeightConfig
@@ -64,12 +75,22 @@ export function computeSchemeScore(
   const performanceScore = Math.round(((seismicScore + sustainScore) / 2) * 100) / 100;
 
   const weightTotal = weights.cost + weights.duration + weights.safety + weights.green || 100;
-  const overall =
+  const weighted =
     (costScore * weights.cost +
       durationScore * weights.duration +
       safetyScore * weights.safety +
       greenScore * weights.green) /
     weightTotal;
+
+  // 领域调节：规则声明在 data/domain-adjustments.ts（单一数据源）
+  const evaluatedAt = scheme.evaluatedAt;
+  const adjustments = evaluatedAt
+    ? resolveDomainAdjustments(evaluatedAt)
+        .filter((a) => a.targetSystems.includes(scheme.id))
+        .map((a) => ({ id: a.id, name: a.name, delta: a.scoreDelta, basis: a.basis }))
+    : [];
+  const adjustmentSum = adjustments.reduce((sum, a) => sum + a.delta, 0);
+  const overall = Math.min(10, Math.max(0, weighted + adjustmentSum));
 
   return {
     cost: costScore,
@@ -83,5 +104,6 @@ export function computeSchemeScore(
     green: greenScore,
     performance: performanceScore,
     overall: Math.round(overall * 100) / 100,
+    ...(adjustments.length > 0 ? { adjustments } : {}),
   };
 }

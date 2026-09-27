@@ -10,9 +10,10 @@
 // calculateNormCompliance, calculateBuildingHeight, checkExtremeParams,
 // estimateCarbonEmission, estimatePrecastRate, estimateConstructionRisk
 
-import { evaluateCompliance } from './norm-evaluator';
+import { evaluateCompliance, resolveBuildingHeight } from './norm-evaluator';
 import { calculateBuildingHeight, getHeightLimit, isKnownSystem } from './code-rules';
-import { resolveBuildingHeight } from './norm-evaluator';
+import { resolveScreeningBonus } from './domain-adjustments';
+import { evaluateScheme, toScheme } from './scheme-evaluator';
 
 // ============ 类型定义 ============
 
@@ -124,6 +125,12 @@ export interface IStructureScheme {
   costBreakdown?: ICostBreakdown;
   foundationSuggestion?: IFoundationSuggestion;
   safetyRiskNotes?: string[];
+  /**
+   * 本套 metrics 所依据的工程参数快照。
+   * metrics 是「(结构体系 × 工程参数)」的二元函数而非体系的内在属性，
+   * 因此必须记录评估条件，否则同一方案在不同调用方会得到不同指标与不同评分。
+   */
+  evaluatedAt?: IProjectParams;
 }
 
 export interface IRecommendation {
@@ -414,7 +421,7 @@ export function estimateCost(
 /**
  * 构造造价拆解说明（与 estimateCost 计算链保持一致）
  */
-function buildCostBreakdown(
+export function buildCostBreakdown(
   schemeId: string,
   params: IProjectParams,
   finalCost: number
@@ -1320,55 +1327,17 @@ export function generateSchemesFromParams(params: IProjectParams): IStructureSch
     }
   }
 
-  // ===== 高烈度高层住宅场景特殊处理：优先抗震墙体系 =====
-  // 工程常识：8 度及以上 + 高度 ≥ 30m + 住宅/公寓 → 框剪/剪力墙/框筒等抗震墙体系更优
-  // 对该场景下的抗震墙类体系追加侧向刚度控制加分，使其排名不低于框架
-  const isHighSeismicHighRiseResidential =
-    params.buildingType === 'residential' &&
-    intensity >= 8 &&
-    height >= 30;
+  // ===== 领域调节：高烈度高层住宅优先抗震墙体系 =====
+  // 规则与加成幅度统一声明在 domain-adjustments.ts（单一数据源），
+  // 与综合评分的调节分同源，避免两处硬编码出现口径漂移。
+  top3 = top3.map((item) => ({
+    ...item,
+    score: item.score + resolveScreeningBonus(item.scheme.id, params),
+  }));
+  top3.sort((a, b) => b.score - a.score);
 
-  if (isHighSeismicHighRiseResidential) {
-    const seismicWallIds = ['shearwall', 'frame-shearwall', 'frame-corewall', 'tube-in-tube'];
-    top3 = top3.map((item) => {
-      if (seismicWallIds.includes(item.scheme.id)) {
-        return { ...item, score: item.score + 8 }; // 侧向刚度与延性控制加分
-      }
-      return item;
-    });
-    top3.sort((a, b) => b.score - a.score);
-  }
-
-  // 为每个方案附加动态计算的指标
-  return top3.map(({ scheme }) => {
-    const cost = estimateCost(scheme.id, params.floors, params.seismicIntensity, params.soilCategory, params.mainSpan);
-    const duration = estimateDuration(scheme.id, params.area, params.floors);
-    const carbonEmission = estimateCarbonEmission(scheme.id, params.floors);
-    const precastRate = estimatePrecastRate(scheme.id, params.floors);
-    const risk = estimateConstructionRisk(scheme.id, params.floors);
-    const costBreakdown = buildCostBreakdown(scheme.id, params, cost);
-
-    return {
-      ...scheme,
-      metrics: {
-        ...scheme.metrics,
-        cost,
-        duration,
-        carbonEmission,
-        precastRate,
-        safetyRisk: risk.level,
-      },
-      normCompliance: calculateNormCompliance(scheme.id, params),
-      foundationSuggestion: suggestFoundation(
-        scheme.id,
-        params.geologyType,
-        params.floors,
-        params.soilCategory
-      ),
-      safetyRiskNotes: risk.notes,
-      ...(costBreakdown && { costBreakdown }),
-    };
-  });
+  // 为每个方案附加动态计算的指标（走统一评估入口，带参数指纹缓存）
+  return top3.map(({ scheme }) => toScheme(evaluateScheme(scheme.id, params)));
 }
 
 // ============ 推荐 / 对话 / 预设 ============

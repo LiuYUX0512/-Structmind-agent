@@ -57,6 +57,88 @@ export interface IRegisteredTool extends IToolDefinition {
   allowedAgents: string[];
 }
 
+// ============ 工程参数归一化 ============
+// P0-3：工具层不得在边界上静默改写工程参数。
+//
+// 旧实现在三个工具里各自「重建」params，把用户填的地质条件、预算、风雪荷载一律换成常量
+// （geologyType 恒 'clay'、budget 恒 4000）。后果是同一个工程在
+// Architect 选型 / Code 校核 / Chief 比选三个环节拿到的是三组不同参数：
+//   - 预算参与候选池评分（structure.ts: budgetRatio = estCost / params.budget）
+//     → 用户填 4500、工具按 4000 算，实测会静默淘汰掉一个可行方案；
+//   - 地质条件参与基础选型 → 用户填软土，工具按黏土给建议。
+// 这与 P0-3 要消灭的「调用方之间口径分裂」是同一类病，只是发生在参数边界而非评分边界。
+//
+// 现统一为「合并」语义：LLM 传了什么就认什么，没传才用默认。
+
+const DEFAULT_TOOL_PARAMS: IProjectParams = {
+  buildingType: 'residential',
+  floors: 10,
+  area: 5000,
+  structurePreference: 'any',
+  seismicIntensity: '7',
+  soilCategory: 'Ⅱ',
+  geologyType: 'clay',
+  mainSpan: 8,
+  budget: 4000,
+  windPressure: '0.4',
+  snowPressure: '0.2',
+  fortificationCategory: 'standard',
+};
+
+const NUMERIC_PARAM_FIELDS = ['floors', 'area', 'mainSpan', 'budget', 'buildingHeight'] as const;
+const TEXT_PARAM_FIELDS = [
+  'buildingType',
+  'structurePreference',
+  'seismicIntensity',
+  'soilCategory',
+  'geologyType',
+  'windPressure',
+  'snowPressure',
+  'fortificationCategory',
+] as const;
+
+/**
+ * 把 LLM 传入的部分参数合并成完整工程参数（不丢弃任何已提供的字段）。
+ * buildingHeight 为可选项：未提供时保持缺省，交由 resolveBuildingHeight 按层数估算。
+ */
+export function normalizeToolParams(raw?: Record<string, unknown>): IProjectParams {
+  const src = raw ?? {};
+  const out: IProjectParams = { ...DEFAULT_TOOL_PARAMS };
+  const bag = out as unknown as Record<string, unknown>;
+
+  for (const field of NUMERIC_PARAM_FIELDS) {
+    const rawValue = src[field];
+    if (rawValue == null || rawValue === '') continue;
+    const value = Number(rawValue);
+    if (Number.isFinite(value)) bag[field] = value;
+  }
+  for (const field of TEXT_PARAM_FIELDS) {
+    const value = src[field];
+    if (typeof value === 'string' && value.trim() !== '') bag[field] = value;
+  }
+  return out;
+}
+
+/** 工程参数的 JSON Schema 片段（供三个工程工具复用，保证 LLM 知道能传哪些字段） */
+const PROJECT_PARAMS_SCHEMA: Record<string, IToolParamProperty> = {
+  buildingType: { type: 'string', description: '建筑类型：residential 住宅 / office 办公 / commercial 商业 / industrial 厂房' },
+  floors: { type: 'number', description: '地上层数' },
+  area: { type: 'number', description: '建筑面积（㎡），影响周期、刚度与工期估算' },
+  structurePreference: { type: 'string', description: '业主结构偏好体系 ID，无偏好填 any' },
+  seismicIntensity: { type: 'string', description: '设防烈度：6/7/8/9' },
+  soilCategory: { type: 'string', description: '场地土类别：Ⅰ/Ⅱ/Ⅲ/Ⅳ' },
+  geologyType: { type: 'string', description: '地质条件（影响基础选型），如 clay 黏土 / sand 砂土 / soft-soil 软土 / rock 岩石' },
+  mainSpan: { type: 'number', description: '主跨（m），影响周期与刚度估算' },
+  budget: { type: 'number', description: '单位造价预算（元/㎡），参与候选池适配度评分' },
+  windPressure: { type: 'string', description: '基本风压（kN/㎡）' },
+  snowPressure: { type: 'string', description: '基本雪压（kN/㎡）' },
+  fortificationCategory: { type: 'string', description: '设防类别：standard 标准 / key 重点 / special 特殊' },
+  buildingHeight: {
+    type: 'number',
+    description: '结构总高度（m）。用户显式指定时必传——高度直接决定适用高度、位移角与周期比判定',
+  },
+};
+
 // ============ 工具注册清单 ============
 
 export const TOOL_REGISTRY: IRegisteredTool[] = [
@@ -70,14 +152,12 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         filters: {
           type: 'object',
           description: '筛选条件，与 IProjectParams 字段一致，至少提供建筑类型、层数、设防烈度',
+          // P0-3：字段集统一由 PROJECT_PARAMS_SCHEMA 提供，避免「执行器读了但大模型看不到」
           properties: {
+            ...PROJECT_PARAMS_SCHEMA,
             buildingType: { type: 'string', description: '建筑类型：residential/office/school/factory/gymnasium', enum: ['residential', 'office', 'school', 'factory', 'gymnasium'] },
-            floors: { type: 'number', description: '建筑层数' },
-            area: { type: 'number', description: '建筑面积（㎡）' },
             seismicIntensity: { type: 'string', description: '抗震设防烈度：6/7/8/9', enum: ['6', '7', '8', '9'] },
             soilCategory: { type: 'string', description: '场地土类别：Ⅰ/Ⅱ/Ⅲ/Ⅳ', enum: ['Ⅰ', 'Ⅱ', 'Ⅲ', 'Ⅳ'] },
-            mainSpan: { type: 'number', description: '主要跨度（米）' },
-            budget: { type: 'number', description: '单位面积预算（元/㎡）' },
             structurePreference: { type: 'string', description: '结构体系偏好，any 表示不限', enum: ['any', 'frame', 'frame-shearwall', 'shearwall', 'steel', 'prefabricated'] },
           },
           required: ['buildingType', 'floors', 'seismicIntensity'],
@@ -90,20 +170,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
     executor: (args: Record<string, unknown>) => {
       const filters = args.filters as Partial<IProjectParams>;
       const topN = (args.topN as number) || 3;
-      const params: IProjectParams = {
-        buildingType: (filters.buildingType as string) || 'residential',
-        floors: Number(filters.floors) || 10,
-        area: Number(filters.area) || 5000,
-        structurePreference: (filters.structurePreference as string) || 'any',
-        seismicIntensity: (filters.seismicIntensity as string) || '7',
-        soilCategory: (filters.soilCategory as string) || 'Ⅱ',
-        geologyType: 'clay',
-        mainSpan: Number(filters.mainSpan) || 8,
-        budget: Number(filters.budget) || 4000,
-        windPressure: (filters.windPressure as string) || '0.4',
-        snowPressure: (filters.snowPressure as string) || '0.2',
-        fortificationCategory: (filters.fortificationCategory as string) || 'standard',
-      };
+      // P0-3：改为合并语义，用户填的地质/预算/风雪荷载不再被常量覆盖
+      const params: IProjectParams = normalizeToolParams(filters as Record<string, unknown>);
       const result = generateSchemesFromParams(params);
       return {
         total: result.length,
@@ -132,13 +200,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         },
         params: {
           type: 'object',
-          description: '工程参数',
-          properties: {
-            floors: { type: 'number', description: '层数' },
-            seismicIntensity: { type: 'string', description: '设防烈度：6/7/8/9' },
-            soilCategory: { type: 'string', description: '场地土类别：Ⅰ/Ⅱ/Ⅲ/Ⅳ' },
-            buildingType: { type: 'string', description: '建筑类型' },
-          },
+          description: '工程参数（缺失字段按常规默认值补齐，已提供字段一律照收）',
+          properties: { ...PROJECT_PARAMS_SCHEMA },
           required: ['floors', 'seismicIntensity'],
         },
       },
@@ -150,22 +213,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
       const p = args.params as Record<string, unknown>;
       // P0-2：参数不合法时显式返回 error，让子 Agent 看到并自我纠正；
       // 既不像旧实现那样静默兜底给出看似专业的错误答案，也不让异常冒泡打断管线
-      const params: IProjectParams = {
-        buildingType: (p.buildingType as string) || 'residential',
-        floors: Number(p.floors) || 10,
-        area: Number(p.area) || 5000,
-        structurePreference: 'any',
-        seismicIntensity: (p.seismicIntensity as string) || '7',
-        soilCategory: (p.soilCategory as string) || 'Ⅱ',
-        geologyType: 'clay',
-        mainSpan: Number(p.mainSpan) || 8,
-        budget: 4000,
-        windPressure: (p.windPressure as string) || '0.4',
-        snowPressure: (p.snowPressure as string) || '0.2',
-        fortificationCategory: (p.fortificationCategory as string) || 'standard',
-        // 修复：此前丢弃了用户手填的建筑高度，一律按层数×3m 估算
-        ...(p.buildingHeight ? { buildingHeight: Number(p.buildingHeight) } : {}),
-      };
+      // P0-3：改为合并语义——用户填的建筑高度、地质、预算一律照收，不再被默认常量覆盖
+      const params: IProjectParams = normalizeToolParams(p);
       let result: INormCompliance;
       try {
         result = calculateNormCompliance(systemId, params);
@@ -818,15 +867,8 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         },
         params: {
           type: 'object',
-          description: '工程参数（用于估算各方案指标）',
-          properties: {
-            buildingType: { type: 'string', description: '建筑类型' },
-            floors: { type: 'number', description: '层数' },
-            area: { type: 'number', description: '面积' },
-            seismicIntensity: { type: 'string', description: '设防烈度' },
-            soilCategory: { type: 'string', description: '场地土类别' },
-            mainSpan: { type: 'number', description: '主跨' },
-          },
+          description: '工程参数（用于估算各方案指标）。缺失字段按常规默认值补齐，已提供字段一律照收',
+          properties: { ...PROJECT_PARAMS_SCHEMA },
           required: ['buildingType', 'floors', 'seismicIntensity'],
         },
         weights: {
@@ -849,20 +891,9 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
       const p = args.params as Record<string, unknown>;
       const w = args.weights as Record<string, number>;
 
-      const params: IProjectParams = {
-        buildingType: (p.buildingType as string) || 'residential',
-        floors: Number(p.floors) || 10,
-        area: Number(p.area) || 5000,
-        structurePreference: 'any',
-        seismicIntensity: (p.seismicIntensity as string) || '7',
-        soilCategory: (p.soilCategory as string) || 'Ⅱ',
-        geologyType: 'clay',
-        mainSpan: Number(p.mainSpan) || 8,
-        budget: 4000,
-        windPressure: (p.windPressure as string) || '0.4',
-        snowPressure: (p.snowPressure as string) || '0.2',
-        fortificationCategory: (p.fortificationCategory as string) || 'standard',
-      };
+      // P0-3：与 check_seismic_requirements / query_structure_systems 共用同一归一化入口，
+      // 保证三个环节看到的是同一组工程参数（候选池、指标、判定结论不再分裂）。
+      const params: IProjectParams = normalizeToolParams(p);
 
       // 生成完整方案数据用于评分
       const allSchemes = generateSchemesFromParams(params);
@@ -925,26 +956,9 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
 
        results.sort((a, b) => b.score - a.score);
 
-       // ===== 高烈度高层住宅场景：抗震墙体系侧向刚度控制加分 =====
-       // 工程常识：8 度及以上 + 高度 ≥ 30m + 住宅 → 框剪/剪力墙类更优
-       // 以侧向刚度控制为第一原则，在标准化评分基础上对抗震墙体系追加调节分
-       const height = params.floors * 3;
-       const parsedIntensity = parseInt(params.seismicIntensity, 10);
-       const isHighSeismicHighRiseResidential =
-         params.buildingType === 'residential' &&
-         parsedIntensity >= 8 &&
-         height >= 30;
-
-       if (isHighSeismicHighRiseResidential) {
-         const seismicWallIds = ['shearwall', 'frame-shearwall', 'frame-corewall', 'tube-in-tube'];
-         results.forEach((r) => {
-           if (seismicWallIds.includes(r.schemeId)) {
-             // 侧向刚度 + 延性控制工程常识加成：约 1.2 分（满分10分）
-             r.score = Math.round((r.score + 1.2) * 10) / 10;
-           }
-         });
-         results.sort((a, b) => b.score - a.score);
-       }
+       // 注：高烈度高层住宅场景的「抗震墙体系侧向刚度控制加分」曾在此处硬编码 +1.2，
+       // 现已统一由 domain-adjustments.ts 声明、在 computeSchemeScore 内应用，
+       // 保证总工排序分 / 方案卡片分 / 优化器分三者口径一致。
 
        return {
         ranking: results,
