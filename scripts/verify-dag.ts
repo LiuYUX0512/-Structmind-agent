@@ -253,7 +253,10 @@ const extractCandidates = (messages: any[]): string[] => {
 // D 簇：验证「无记忆命中」时 static 与 dynamic 逐字段一致（影子并行）。
 // 用 7 度避免命中冷启动默认经验（default-precheck-high-intensity 的触发条件为
 // seismicIntensity >= 8 && realMode），保证 dynamic 的 plan = 默认模板。
-// 「经验命中 → 插入预校核」这一 dynamic 的故意增强由 verify-memory 的 C 簇覆盖。
+//
+// 【重要说明（交接时勿误解为漏测）】：8 度 real 模式下 dynamic 的行为与 static
+// 不同，这是**设计意图**——dynamic 会命中冷启动默认经验，插入抗震预校核节点
+// （经验闭环激活的故意增强）。该行为由 verify-memory 的 C 簇覆盖验证。
 const REAL_PARAMS: IProjectParams = {
   buildingType: 'residential',
   floors: 8,
