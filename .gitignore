@@ -73,3 +73,6 @@ scripts/verify-kb-out/
 scripts/verify-dag-out/
 scripts/verify-memory-out/
 scripts/verify-metacognition-out/
+
+# 发布用构建产物（sites 平台，相对路径 base）
+dist-publish/
