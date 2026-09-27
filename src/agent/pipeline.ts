@@ -15,6 +15,14 @@ import {
 } from './types';
 import type { IProjectParams, IWeightConfig, IStructureScheme } from '@/data/structure';
 import { STRUCTURE_SYSTEM_LIBRARY, MOCK_WEIGHT_CONFIG } from '@/data/structure';
+import {
+  arbitrateChiefDecision,
+  parseChiefDecision,
+  DECISION_BLOCK_INSTRUCTION,
+  type IArbitratedDecision,
+  type IChiefDecisionBlock,
+  type TDecisionSource,
+} from './decision';
 
 // ============ 子 Agent 角色定义 ============
 
@@ -625,7 +633,9 @@ export class AgentPipeline {
         '\n   - 这个方案最可能出问题的地方是什么' +
         '\n   - 什么情况下需要重新评估（触发条件）' +
         '\n   - 后续深化设计时重点关注什么' +
-        '\n6. 下一步优化建议';
+        '\n6. 下一步优化建议' +
+        // P1-1：把最终裁定权交还给总工 Agent（此前它的结论只被用来当文案，推荐方案由评分 argmax 决定）
+        + DECISION_BLOCK_INSTRUCTION;
       const result = await this.engine.run(prompt, 'chief');
 
       // 从日志中提取 compare_schemes 结果
@@ -645,15 +655,32 @@ export class AgentPipeline {
         this.conclusions.push(result.finalAnswer);
       }
 
+      // P1-1：最终推荐由「总工裁定 + 代码硬约束校验」共同决定，而不是直接取评分 argmax
+      const ranking =
+        (compareResult as { ranking?: IAgentPipelineResult['ranking'] } | undefined)?.ranking ?? [];
+      const decision = this.runChiefArbitration(
+        ranking,
+        parseChiefDecision(result.finalAnswer || '')
+      );
+
       this.finalResult = {
         schemes: this.candidateSchemes,
         recommended: {
-          schemeId: (compareResult as any)?.recommended?.schemeId || schemeIds[0],
-          schemeName: (compareResult as any)?.recommended?.schemeName || this.candidateSchemes[0]?.name || '',
-          overallScore: (compareResult as any)?.recommended?.overallScore || 0,
+          schemeId: decision.schemeId,
+          schemeName: decision.schemeName,
+          overallScore: decision.overallScore,
           reason: result.finalAnswer || '',
+          decisionSource: decision.decisionSource,
+          decisionNote: decision.decisionNote,
+          scoreTopSchemeId: decision.scoreTopSchemeId,
+          ...(decision.llmChoiceSchemeId ? { llmChoiceSchemeId: decision.llmChoiceSchemeId } : {}),
+          ...(decision.llmConfidence ? { llmConfidence: decision.llmConfidence } : {}),
+          ...(decision.decisiveFactor ? { decisiveFactor: decision.decisiveFactor } : {}),
+          ...(decision.hardConstraintViolations
+            ? { hardConstraintViolations: decision.hardConstraintViolations }
+            : {}),
         },
-        ranking: (compareResult as any)?.ranking || [],
+        ranking,
         codeChecks: this.codeChecks,
         metrics: this.metrics,
         advice: this.withBudgetRisk(extractAdviceFromMarkdown(result.finalAnswer || '')),
@@ -672,9 +699,23 @@ export class AgentPipeline {
         this.conclusions.push(conclusionEntry.content);
       }
 
+      // P1-1：演示轨迹同样走裁定层，保证两种模式下「硬约束能否决评分首选」的行为一致
+      const traceDecision = this.runChiefArbitration(ranking, null, 'trace');
+
       this.finalResult = {
         schemes: this.candidateSchemes,
-        recommended,
+        recommended: {
+          schemeId: traceDecision.schemeId || recommended.schemeId,
+          schemeName: traceDecision.schemeName || recommended.schemeName,
+          overallScore: traceDecision.overallScore || recommended.overallScore,
+          reason: recommended.reason,
+          decisionSource: traceDecision.decisionSource,
+          decisionNote: traceDecision.decisionNote,
+          scoreTopSchemeId: traceDecision.scoreTopSchemeId,
+          ...(traceDecision.hardConstraintViolations
+            ? { hardConstraintViolations: traceDecision.hardConstraintViolations }
+            : {}),
+        },
         ranking,
         codeChecks: this.codeChecks,
         metrics: this.metrics,
@@ -685,6 +726,55 @@ export class AgentPipeline {
         budgetExceeded: [...this.budgetExceededIds],
       };
     }
+  }
+
+  /**
+   * P1-1：总工裁定 + 代码硬约束校验。
+   *
+   * 旧实现直接取 compare_schemes 返回的评分 argmax 作为最终推荐，总工 Agent 的四段推理
+   * 只被用来生成 reason 文案——关掉大模型功能仍能保留约 95% 的产出。
+   * 现改为：大模型裁定优先，但必须过强制性条文与人工锁定两道校验；
+   * 被否决时留下条文级证据并写入行动日志，让回退在界面上真实可见。
+   */
+  private runChiefArbitration(
+    ranking: IAgentPipelineResult['ranking'],
+    llmDecision: IChiefDecisionBlock | null,
+    fallbackSource?: TDecisionSource
+  ): IArbitratedDecision {
+    const decision = arbitrateChiefDecision({
+      candidates: this.candidateSchemes.map((s) => ({ id: s.id, name: s.name })),
+      ranking: ranking.map((r) => ({ schemeId: r.schemeId, score: r.score })),
+      codeChecks: this.codeChecks,
+      llmDecision,
+      ...(this.humanOverrides?.lockedSchemeIds
+        ? { lockedSchemeIds: this.humanOverrides.lockedSchemeIds }
+        : {}),
+      ...(fallbackSource ? { fallbackSource } : {}),
+    });
+
+    // 裁定被硬约束否决时写入一条可见日志——这是回退闭环最真实的触发源
+    if (decision.decisionSource === 'constraint-override') {
+      this.actionLog.push({
+        step: this.actionLog.length + 1,
+        type: 'conclusion',
+        agent: 'chief',
+        content: `⛔ 强制回退：${decision.decisionNote}`,
+        timestamp: Date.now(),
+      });
+    } else if (
+      decision.decisionSource === 'llm' &&
+      decision.schemeId !== decision.scoreTopSchemeId
+    ) {
+      this.actionLog.push({
+        step: this.actionLog.length + 1,
+        type: 'conclusion',
+        agent: 'chief',
+        content: `🔀 工程判断生效：${decision.decisionNote}`,
+        timestamp: Date.now(),
+      });
+    }
+
+    return decision;
   }
 
   /** 预算超限风险注入 advice（HITL 预算约束在建议中如实反映） */

@@ -242,6 +242,10 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         checks: result.checks.map((c) => ({
           name: c.name,
           status: c.status,
+          // P1-1：severity 必须随判定结果返回。它是「强制性 / 一般性 / 提示性」的标记，
+          // 决策裁定层据此判断某条违反能否否决总工的选择。
+          // 此前该字段在此处被剥掉，导致硬约束校验在真实模式下永不生效。
+          severity: c.severity,
           value: c.value,
           requirement: c.requirement,
           description: c.description,
