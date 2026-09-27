@@ -47,11 +47,9 @@ export interface ICounterfactualMetricDelta {
   delta: number;
   /** 变化百分比（before 为 0 时记 null） */
   deltaPercent: number | null;
-  /** 对使用者而言的方向：good=变好 / bad=变差 / neutral=基本持平 / info=中性信息（如碳排放下降但造价上升需权衡） */
+  /** 对使用者而言的方向：good=变好 / bad=变差 / neutral=基本持平或优劣取决于项目定位 */
   direction: 'good' | 'bad' | 'neutral';
-  /** 越低越好的指标（造价/工期/碳排/风险） */
-  lowerIsBetter: boolean;
-  /** 归因说明：为什么会变 */
+  /** 归因说明：为什么会变（只陈述可验证的输入依赖，不编造中间机制） */
   attribution: string;
 }
 
@@ -120,6 +118,18 @@ export interface ICounterfactualReport {
 
 // ============ 指标元数据 ============
 
+/**
+ * 归因方式的诚实性约束：
+ *
+ * 引擎只知道「参数变了 → 指标跟着变了」，它并不知道中间发生了什么力学或经济机制。
+ * 因此归因文案只允许陈述两类事实：
+ *   (a) 本次**实际变动**的参数（来自 diffParams，可验证）
+ *   (b) 该指标在当前模型中**由哪些输入决定**（来自估算函数签名，可验证）
+ *
+ * 严禁写「因为构件截面加大所以造价上升」这种编造的中间机制——
+ * 那是超出模型知识范围的断言。宁可说「造价随层数、设防烈度、场地类别联动」，
+ * 也不要说「造价上升是因为配筋率提高」。
+ */
 interface IMetricMeta {
   key: string;
   label: string;
@@ -127,8 +137,24 @@ interface IMetricMeta {
   lowerIsBetter: boolean;
   /** 从评估快照取出该指标值 */
   read: (ev: ISchemeEvaluation) => number;
-  /** 归因模板：(delta) => 该指标为何变化（不含「把 X 改成 Y」这类上下文，由展示层统一给出） */
-  attribute: (delta: number) => string;
+  /**
+   * 该指标在当前模型中的**真实输入依赖**（与估算函数签名一致）。
+   * 用于生成可验证的归因，替代编造的因果链。
+   */
+  drivers: string[];
+  /**
+   * 方向判定是否适用"越大越好/越小越好"的通用规则。
+   * false 表示该指标的优劣**取决于项目定位**，不能由数值大小直接判定——
+   * 这类指标一律记为 neutral，避免把中性变化渲染成缺陷（装配率即典型：
+   * GB/T 51129-2017 只在项目定位为装配式建筑时才要求 ≥50%，
+   * 现浇项目装配率低并不构成问题）。
+   */
+  polarDirection: boolean;
+  /**
+   * 该指标在本模型中的**定量敏感度说明**（仅在估算函数里确实写明了系数时才提供）。
+   * 引用代码中真实存在的系数，不是编造的机制解释。
+   */
+  quantifiedNote?: string;
 }
 
 const METRIC_META: IMetricMeta[] = [
@@ -138,10 +164,9 @@ const METRIC_META: IMetricMeta[] = [
     unit: '元/㎡',
     lowerIsBetter: true,
     read: (ev) => ev.metrics.cost,
-    attribute: (d) =>
-      d === 0
-        ? '结构造价基本持平'
-        : `结构造价${d > 0 ? '上升' : '下降'}，主要来自构件截面、配筋率与体系单价的联动`,
+    drivers: ['结构体系', '层数', '设防烈度', '场地类别', '柱网跨度'],
+    polarDirection: true,
+    quantifiedNote: '本模型：层数>10 后每层 +0.5% 单价；设防烈度每提高 1 度 +9%；跨度超过 8m 每米 +1.5%',
   },
   {
     key: 'totalCost',
@@ -149,8 +174,12 @@ const METRIC_META: IMetricMeta[] = [
     unit: '万元',
     lowerIsBetter: true,
     read: (ev) => Math.round((ev.metrics.cost * ev.params.area) / 10000),
-    attribute: (d) =>
-      d === 0 ? '总造价基本持平' : `总造价（=单方造价×建筑面积）${d > 0 ? '上升' : '下降'}`,
+    // 总造价 = 单方造价 × 建筑面积；单方造价本身又是体系/层数/烈度/场地/跨度的函数，
+    // 故 drivers 直接列出**用户可见的参数**，而非「单方造价」这类内部中间量——
+    // 否则与 diffParams 的字段命名体系对不上，会误判为「非直接输入」。
+    drivers: ['结构体系', '层数', '设防烈度', '场地类别', '柱网跨度', '建筑面积'],
+    polarDirection: true,
+    quantifiedNote: '本模型：单方造价随体系/层数/烈度/场地/跨度变化，乘以建筑面积得总造价',
   },
   {
     key: 'duration',
@@ -158,10 +187,9 @@ const METRIC_META: IMetricMeta[] = [
     unit: '月',
     lowerIsBetter: true,
     read: (ev) => ev.metrics.duration,
-    attribute: (d) =>
-      d === 0
-        ? '工期影响可忽略'
-        : `工期${d > 0 ? '延长' : '缩短'}——层数是工期的主导变量（每层约 0.2~0.4 月流水节拍）`,
+    drivers: ['建筑面积', '层数', '结构体系'],
+    polarDirection: true,
+    quantifiedNote: '本模型：层数>6 后每增加一层 +0.2~0.4 月；现浇标准层约 4~6 层/月',
   },
   {
     key: 'carbonEmission',
@@ -169,8 +197,9 @@ const METRIC_META: IMetricMeta[] = [
     unit: 'kgCO₂/㎡',
     lowerIsBetter: true,
     read: (ev) => ev.metrics.carbonEmission,
-    attribute: (d) =>
-      d === 0 ? '碳排放基本不变' : `碳排放${d > 0 ? '增加' : '减少'}，与结构材料用量正相关`,
+    drivers: ['结构体系', '层数'],
+    polarDirection: true,
+    quantifiedNote: '本模型：层数>10 后每 10 层 +3% 单位面积碳排',
   },
   {
     key: 'seismicPerformance',
@@ -178,10 +207,8 @@ const METRIC_META: IMetricMeta[] = [
     unit: '分',
     lowerIsBetter: false,
     read: (ev) => ev.metrics.seismicPerformance,
-    attribute: (d) =>
-      d === 0
-        ? '抗震性能评级不变'
-        : `抗震性能${d > 0 ? '提升' : '下降'}（体系固有属性 + 设防烈度共同决定）`,
+    drivers: ['结构体系'],
+    polarDirection: true,
   },
   {
     key: 'constructionDifficulty',
@@ -189,10 +216,8 @@ const METRIC_META: IMetricMeta[] = [
     unit: '分',
     lowerIsBetter: true,
     read: (ev) => ev.metrics.constructionDifficulty,
-    attribute: (d) =>
-      d === 0
-        ? '施工难度不变'
-        : `施工难度${d > 0 ? '上升' : '下降'}（主要来自体系工艺复杂度）`,
+    drivers: ['结构体系', '层数'],
+    polarDirection: true,
   },
   {
     key: 'sustainability',
@@ -200,8 +225,8 @@ const METRIC_META: IMetricMeta[] = [
     unit: '分',
     lowerIsBetter: false,
     read: (ev) => ev.metrics.sustainability,
-    attribute: (d) =>
-      d === 0 ? '可持续性评级不变' : `可持续性${d > 0 ? '提升' : '下降'}`,
+    drivers: ['结构体系'],
+    polarDirection: true,
   },
   {
     key: 'precastRate',
@@ -209,23 +234,47 @@ const METRIC_META: IMetricMeta[] = [
     unit: '%',
     lowerIsBetter: false,
     read: (ev) => ev.metrics.precastRate.rate,
-    attribute: (d) =>
-      d === 0
-        ? '装配率不变'
-        : `装配率${d > 0 ? '提升' : '下降'}（预制构件比例随体系与层数变化）`,
+    drivers: ['结构体系', '层数'],
+    polarDirection: false,
   },
 ];
 
-/** 建筑高度上限：不同体系在给定设防下的规范限值由 norm-evaluator 判定，此处仅用于差价归因 */
-function readHeight(ev: ISchemeEvaluation): number {
-  return resolveBuildingHeight(ev.params);
-}
-
 // ============ 差异计算 ============
+
+/**
+ * 生成可验证的归因文案。
+ *
+ * 只陈述两件可验证的事：
+ *   1) 该指标在模型中由哪些输入决定（drivers，来自估算函数签名）
+ *   2) 本次实际变动了哪些 drivers（来自 diffParams）
+ * 然后指出「变动项 ∩ 依赖项」，说明哪些变动确实可能影响本指标。
+ * 这比编造力学机制诚实得多，也更有用——用户能看出自己改的参数是否真的作用于此指标。
+ */
+function buildAttribution(
+  meta: IMetricMeta,
+  delta: number,
+  changedFields: ICounterfactualChange[]
+): string {
+  if (delta === 0) return `${meta.label}基本持平`;
+
+  const dirText = `${meta.label}${delta > 0 ? '上升' : '下降'}`;
+  const changedLabels = changedFields.map((c) => c.label);
+  const note = meta.quantifiedNote ? `。${meta.quantifiedNote}` : '';
+
+  // 本次变动项中，哪些是该指标的真实输入
+  const relevant = changedFields.filter((c) => meta.drivers.includes(c.label));
+  if (relevant.length > 0) {
+    return `${dirText}。本次变动中，${relevant.map((c) => c.label).join('、')}是本指标的模型输入${note}`;
+  }
+  // 本次未直接改动该指标的输入 → 说明是间接联动，如实标注
+  const others = changedLabels.length > 0 ? changedLabels.join('、') : '本次调整';
+  return `${dirText}（本次改动的是${others}，非本指标的直接输入，属模型内部联动）${note}`;
+}
 
 function computeMetricDeltas(
   baseline: ISchemeEvaluation,
-  after: ISchemeEvaluation
+  after: ISchemeEvaluation,
+  changedFields: ICounterfactualChange[]
 ): ICounterfactualMetricDelta[] {
   const out: ICounterfactualMetricDelta[] = [];
   for (const meta of METRIC_META) {
@@ -238,6 +287,9 @@ function computeMetricDeltas(
     let direction: ICounterfactualMetricDelta['direction'];
     const eps = Math.max(Math.abs(before) * 0.005, 1e-6); // 0.5% 以内视为持平
     if (Math.abs(delta) <= eps) {
+      direction = 'neutral';
+    } else if (!meta.polarDirection) {
+      // 优劣取决于项目定位的指标（如装配率）：数值大小不足以判定好坏
       direction = 'neutral';
     } else {
       const good = meta.lowerIsBetter ? delta < 0 : delta > 0;
@@ -253,8 +305,7 @@ function computeMetricDeltas(
       delta,
       deltaPercent,
       direction,
-      lowerIsBetter: meta.lowerIsBetter,
-      attribution: meta.attribute(delta),
+      attribution: buildAttribution(meta, delta, changedFields),
     });
   }
   return out;
@@ -364,7 +415,8 @@ export function simulateSystemCounterfactual(
   const baseline = evaluateScheme(systemId, baselineParams);
   const counterfactual = evaluateScheme(systemId, normalizedAfter);
 
-  const metricDeltas = computeMetricDeltas(baseline, counterfactual);
+  const changedFields = diffParams(baselineParams, normalizedAfter);
+  const metricDeltas = computeMetricDeltas(baseline, counterfactual, changedFields);
   const checkFlips = computeCheckFlips(baseline, counterfactual);
 
   const mandatoryViolationsBefore = countMandatoryViolations(baseline);
@@ -721,8 +773,9 @@ function normalizeSoil(raw: string): string | null {
 }
 
 /**
- * 直接套用一组参数改动（用于 UI 上的交互式 what-if 滑杆）。
- * 与 resolveInterventionFromText 互补：这里接受结构化输入，不做文本解析。
+ * 直接套用一组参数改动。
+ * 与 resolveInterventionFromText 互补：这里接受结构化输入，不做文本解析，
+ * 供「已知确切改动」的调用方使用（如将来把参数字段做成滑杆直接拖动）。
  */
 export function applyParamChanges(
   baseline: IProjectParams,
@@ -735,14 +788,3 @@ export function applyParamChanges(
   }
   return next;
 }
-
-/** 供 UI 使用的字段标签导出 */
-export function fieldLabel(field: string): string {
-  return FIELD_LABELS[field] ?? field;
-}
-
-export function fieldUnit(field: string): string {
-  return FIELD_UNITS[field] ?? '';
-}
-
-export { readHeight };

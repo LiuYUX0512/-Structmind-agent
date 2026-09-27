@@ -163,6 +163,41 @@ function withFloors(floors: number): IProjectParams {
     r.metricDeltas.filter((d) => d.direction !== 'neutral').every((d) => d.attribution.length > 0),
     '归因非空'
   );
+
+  // C8 —— 归因诚实性：只允许陈述「可验证的输入依赖」，不得编造力学/经济机制。
+  // 这条守护的是「引擎不知道中间机制，就不许声称知道」。
+  const allText = r.metricDeltas.map((d) => d.attribution).join(' ');
+  const forged = ['配筋率提高', '构件截面加大', '截面加大所以', '因为.*所以', '刚度不足所以'];
+  push(
+    'C8 归因不编造中间机制',
+    !forged.some((p) => new RegExp(p).test(allText)),
+    allText.slice(0, 120)
+  );
+
+  // C9 —— 归因必须指认本次真实变动的参数（可验证性）
+  const costAttr = byKey.get('cost')?.attribution ?? '';
+  push(
+    'C9 归因指认本次实际变动的参数',
+    costAttr.includes('层数'),
+    costAttr
+  );
+
+  // C10 —— 装配率未跨越 50% 门槛时不得判为 bad（它取决于项目定位，不是越高越好）
+  push(
+    'C10 装配率未跨门槛时判为 neutral 而非 bad',
+    byKey.get('precastRate')?.direction === 'neutral',
+    `装配率 ${byKey.get('precastRate')?.before}% → ${byKey.get('precastRate')?.after}%，direction=${byKey.get('precastRate')?.direction}`
+  );
+
+  // C11 —— 装配率下降不得拉低整案评价。
+  // 语义依据：装配率取决于项目定位（装配式建筑 vs 现浇），不是「越高越好」的绝对指标；
+  // 降层导致装配率自然回落是结构性副产物，不该渲染成缺陷。
+  // 判据：verdict 不应因装配率一项变差而落到 worsened。
+  push(
+    'C11 装配率回落不使降层推演落到 worsened',
+    r.verdict !== 'worsened',
+    `verdict=${r.verdict}, summary=${r.summary}`
+  );
 }
 
 // ============================================================

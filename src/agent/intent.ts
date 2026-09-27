@@ -1129,7 +1129,6 @@ export class IntentEngine {
   /** 把反事实推演报告渲染成 Markdown（对齐 handleAskBudgetCut 的表格化风格） */
   private renderCounterfactual(report: ICounterfactualReport): string {
     const lines: string[] = [];
-    const changeText = report.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join('、');
 
     lines.push('## 反事实推演：如果把条件改成这样会怎样');
     lines.push('');
@@ -1154,7 +1153,7 @@ export class IntentEngine {
     lines.push('### 各方案在假设条件下的表现');
     lines.push('');
     for (const r of report.results) {
-      lines.push(this.renderOneSystem(r, changeText));
+      lines.push(this.renderOneSystem(r));
       lines.push('');
     }
 
@@ -1183,8 +1182,7 @@ export class IntentEngine {
   }
 
   /** 单个体系的反事实结论块 */
-  private renderOneSystem(r: ICounterfactualResult, changeText: string): string {
-    void changeText;
+  private renderOneSystem(r: ICounterfactualResult): string {
     const lines: string[] = [];
     const badge =
       r.verdict === 'improved' ? '✅ 改善' :
@@ -1197,13 +1195,16 @@ export class IntentEngine {
     lines.push(r.summary);
     lines.push('');
 
-    // 指标对比表（只列有变化的，全无变化则说明）
-    const changed = r.metricDeltas.filter((d) => d.direction !== 'neutral');
+    // 指标对比表：凡**数值确实变化**的指标都要列出（含方向待定的中性项）。
+    // 注意不能用 direction !== 'neutral' 过滤——那会把「装配率这类优劣取决于项目定位、
+    // 但数值确实变了」的指标整条隐藏，用户会以为它没变。
+    const changed = r.metricDeltas.filter((d) => d.delta !== 0);
     if (changed.length > 0) {
       lines.push('| 指标 | 假设前 | 假设后 | 变化 |');
       lines.push('|------|--------|--------|------|');
       changed.forEach((d) => {
-        const arrow = d.direction === 'good' ? '📈 改善' : '📉 变差';
+        const arrow =
+          d.direction === 'good' ? '📈 改善' : d.direction === 'bad' ? '📉 变差' : '➖ 视定位';
         const pct = d.deltaPercent !== null ? `（${d.deltaPercent > 0 ? '+' : ''}${d.deltaPercent}%）` : '';
         const sign = d.delta > 0 ? '+' : '';
         lines.push(
@@ -1211,10 +1212,10 @@ export class IntentEngine {
         );
       });
       lines.push('');
-      // 归因（只对前 2 个重要变化解释，避免冗长）
-      const top = changed.slice(0, 2);
-      top.forEach((d) => lines.push(`> 归因：${d.attribution}。`));
-      lines.push('');
+      // 归因：只挑"方向明确"的变化解释（中性项不产生判断，无需归因占用篇幅）
+      const notable = changed.filter((d) => d.direction !== 'neutral').slice(0, 2);
+      notable.forEach((d) => lines.push(`> 归因：${d.attribution}。`));
+      if (notable.length > 0) lines.push('');
     } else {
       lines.push('（该方案的各项指标基本不受此次假设影响）');
       lines.push('');
