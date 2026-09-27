@@ -6,6 +6,8 @@
 
 import { TraceEngine } from './trace-engine';
 import { RealEngine } from './real-engine';
+import { DagScheduler, type ITaskNode, type IReplanInstruction } from './dag-engine';
+import { Planner, type IPlanNodeSpec } from './planner';
 import {
   SUB_AGENT_SPECS,
   type IAgentPipelineResult,
@@ -219,7 +221,7 @@ export class AgentPipeline {
     }
 
     try {
-      return await this.runCore();
+      return await this.execute();
     } catch (e) {
       // 保命机制：真实模式崩溃时自动降级到演示轨迹模式继续跑完（透明降级，不静默）
       if (this.config.mode === 'real') {
@@ -227,12 +229,174 @@ export class AgentPipeline {
         this.config = { ...this.config, mode: 'trace' };
         this.resetState();
         this.onDegrade?.(reason);
-        const result = await this.runCore();
+        const result = await this.execute();
         this.finalResult = { ...result, degraded: { from: 'real', reason } };
         return this.finalResult;
       }
       throw e;
     }
+  }
+
+  /**
+   * 编排分派（模块①：代际兼容开关）。
+   *   plannerMode === 'dynamic' → DAG 调度器（新引擎）
+   *   其余（默认 'static'）→ runCore（旧硬编码四阶段，保命默认值）
+   */
+  private async execute(): Promise<IAgentPipelineResult> {
+    if (this.config.plannerMode === 'dynamic') {
+      return this.runDynamic();
+    }
+    return this.runCore();
+  }
+
+  /**
+   * 动态模式：Planner 生成 DAG 拓扑 → DagScheduler 执行。
+   * 默认模板与旧四阶段同构，行为逐字段一致；差异仅在「编排方式」。
+   */
+  private async runDynamic(): Promise<IAgentPipelineResult> {
+    this.applyHumanOverrideLogs();
+
+    const planner = new Planner();
+    const plan = planner.buildPlan({
+      params: this.params,
+      weights: this.weights,
+      realMode: this.config.mode === 'real',
+      allowRecheck: this.config.allowRecheck !== false,
+    });
+
+    const scheduler = new DagScheduler<this>({ maxReplans: 8 });
+    const nodes = plan.map((spec) => this.bindNode(spec));
+
+    await scheduler.run(nodes, this);
+
+    if (!this.finalResult) {
+      throw new Error('管线运行异常，未生成最终结果');
+    }
+    return this.finalResult;
+  }
+
+  /**
+   * 把 Planner 输出的计划规格绑定为可执行节点（注入 executor）。
+   * executor 复用 runArchitect / runCode / runEconomist / runChief 四个私有方法，
+   * 保证 dynamic 与 static 走的是同一份执行逻辑（影子并行逐字段一致的前提）。
+   */
+  private bindNode(spec: IPlanNodeSpec): ITaskNode<this, unknown> {
+    switch (spec.kind) {
+      case 'architect': {
+        // feedback 非空表示被校核打回重出：携带上一轮校核反馈（通过 spec 显式传递，无共享状态）
+        return {
+          id: spec.id,
+          label: spec.label,
+          deps: spec.deps,
+          run: async () => {
+            await this.runArchitect(spec.feedback);
+            this.emitProgress(1);
+          },
+        };
+      }
+      case 'code': {
+        return {
+          id: spec.id,
+          label: spec.label,
+          deps: spec.deps,
+          run: async () => {
+            await this.runCode();
+            this.emitProgress(2);
+            return this.checkRecheck(spec.feedbackLoop ?? 0);
+          },
+        };
+      }
+      case 'economist': {
+        return {
+          id: spec.id,
+          label: spec.label,
+          deps: spec.deps,
+          run: async () => {
+            await this.runEconomist();
+            this.emitProgress(3);
+          },
+        };
+      }
+      case 'chief': {
+        return {
+          id: spec.id,
+          label: spec.label,
+          deps: spec.deps,
+          run: async () => {
+            this.computeBudgetExceeded();
+            await this.runChief();
+            this.emitProgress(4);
+          },
+        };
+      }
+    }
+  }
+
+  /**
+   * 校核回退闭环的 DAG 表达（递归重规划）。
+   * 旧 runCore 用 for 循环硬编码「Code 发现违规 → Architect 重出 → 复核」；
+   * 此处把「打回」表达为一次 replan 指令：插入 architect-r{loop} + code-r{loop}
+   * 到 economist 之前。loop 与旧 MAX_LOOPS=2 对齐，保证行为一致。
+   */
+  private checkRecheck(loop: number): IReplanInstruction<this> | void {
+    // 仅在真实模式且允许回退时启用（与旧逻辑的开关条件一致）
+    if (this.config.mode !== 'real' || this.config.allowRecheck === false) return;
+
+    const violations = this.collectViolations();
+    if (violations.length === 0) {
+      // 无违规：若此前发生过打回，标记「全部通过」
+      if (this.correctionMeta) this.correctionMeta.allPass = true;
+      return;
+    }
+
+    const MAX_LOOPS = 2;
+    if (loop >= MAX_LOOPS) {
+      // 轮次已用完，接受现状（与旧 for 循环上限一致）
+      return;
+    }
+
+    const nextLoop = loop + 1;
+    const feedback = violations
+      .map((v) => `【校核未通过】${v.schemeName}（${v.schemeId}）：${v.summary}`)
+      .join('\n');
+    this.sharedContext.push(`第 ${nextLoop} 轮校核反馈：\n${feedback}`);
+    this.correctionMeta = {
+      loops: nextLoop,
+      replacements: violations.map((v) => ({
+        original: v.schemeId,
+        replacement: '',
+        reason: v.summary,
+        loop: nextLoop,
+        finalStatus: 'rechecking',
+      })),
+      allPass: false,
+    };
+
+    const prevCodeId = loop === 0 ? 'code' : `code-r${loop}`;
+    return {
+      __replan: true,
+      insertBefore: 'economist',
+      reason: `规范校核未通过，打回方案创作重出（第 ${nextLoop} 轮）`,
+      nodes: [
+        this.bindNode({
+          id: `architect-r${nextLoop}`,
+          label: `方案创作（第 ${nextLoop} 轮重出）`,
+          agent: 'architect',
+          kind: 'architect',
+          deps: [prevCodeId],
+          feedbackLoop: nextLoop,
+          feedback,
+        }),
+        this.bindNode({
+          id: `code-r${nextLoop}`,
+          label: `规范校核（第 ${nextLoop} 轮复核）`,
+          agent: 'code',
+          kind: 'code',
+          deps: [`architect-r${nextLoop}`],
+          feedbackLoop: nextLoop,
+        }),
+      ],
+    };
   }
 
   /** 核心执行：四阶段 + 真实模式校核回退闭环 */

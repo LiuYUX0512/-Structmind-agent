@@ -268,6 +268,13 @@ export interface IHumanOverrides {
 /** 推理引擎配置 */
 export interface IEngineConfig {
   mode: 'real' | 'trace';
+  /**
+   * 编排模式（模块①：DAG 引擎引入的代际兼容开关）：
+   *   'static'（默认）—— 走旧的硬编码四阶段顺序（pipeline.runCore），保命默认值；
+   *   'dynamic' —— 走新的 DAG 调度器（planner 生成拓扑 → dag-engine 执行）。
+   * 两者在默认模板下行为逐字段一致，可一键切换对比验证。
+   */
+  plannerMode?: 'static' | 'dynamic';
   endpoint?: string;
   model?: string;
   apiKey?: string;

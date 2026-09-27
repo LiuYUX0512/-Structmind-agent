@@ -24,46 +24,63 @@
 
 ## 🏗️ 系统架构：多 Agent 协同管线
 
+```mermaid
+flowchart TB
+  subgraph UI["前端 UI（依赖 runAgentPipeline + IAgentPipelineResult）"]
+    U1[参数面板 / 对话 / 报告]
+  end
+
+  subgraph L1["L1 意图层（intent.ts）"]
+    I1[意图解析] --> I2[What-If / 变更 / 询问]
+  end
+
+  subgraph L2["L2 规划层（planner.ts）"]
+    P1[Planner] --> P2[DAG 计划]
+    P2 --> P3[条件跳过 / 递归重规划]
+  end
+
+  subgraph L3["L3 执行层（dag-engine.ts 调度）"]
+    D1[DAG 调度器] --> D2[Architect 选型]
+    D1 --> D3[Code 校核]
+    D1 --> D4[Economist 评估]
+    D2 --> D3
+    D2 --> D4
+    D3 --> D5[Chief 评审]
+    D4 --> D5
+    D5 -.校核违规 replan.-> D2
+  end
+
+  subgraph L4["L4 工具层（12 个零幻觉计算工具）"]
+    T1[TOOL_REGISTRY]
+  end
+
+  U1 --> I1
+  I2 --> P1
+  D3 --> T1
+  D4 --> T1
+  D2 --> T1
+  D5 --> T1
+
+  style L2 fill:#eef6ff
+  style L3 fill:#f0fdf4
+  style L4 fill:#fff7ed
 ```
-用户输入工程参数
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           意图理解 Agent（intent.ts）          │
-│   解析参数完整性 / 语义归一 / 模式识别 / 参数补全   │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           方案创作工程师（pipeline.ts）         │
-│   依据工程参数生成候选结构体系与初始截面           │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           规范校核工程师（real-engine.ts）       │
-│   抗震 / 耐火 / 位移 / 承载 逐条判定（规则引擎）    │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           经济评估工程师（optimizer.ts）         │
-│   造价 / 工期 / 碳排放 / 施工难度 多目标量化       │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           总工评审 Agent（反思 + 辩论 + 加权）    │
-│   四维权重综合评分 → 推荐方案 + 风险提示           │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-       综合比选结果 · 规范校核报告 · 智能问答
-```
+
+### 编排双模式（代际兼容）
+
+`IEngineConfig.plannerMode` 控制编排方式，默认 `static`（保命默认值，行为与旧版完全一致）：
+
+| 模式 | 编排方式 | 适用场景 |
+|---|---|---|
+| `static`（默认） | 旧硬编码四阶段顺序（`pipeline.runCore`） | 生产 / 对比基准 |
+| `dynamic` | Planner 生成 DAG → `dag-engine` 调度执行 | 验证新引擎；模块②③接入记忆后动态化 |
+
+两种模式在默认模板下输出**逐字段一致**（影子并行保证，见 `scripts/verify-dag.ts`）。
 
 ### 设计要点
 
 - **大模型只做"调度员/翻译官"**：意图解析、自然语言问答由 LLM 完成；**所有数值计算（内力估算、配筋率、挠度、碳排系数）由确定性规则引擎执行**，杜绝大模型幻觉导致的"拍脑袋算结构"。
+- **规划与执行分离**：`planner.ts` 只输出计划拓扑（节点 + 依赖 + 条件），`pipeline.ts` 绑定执行器，`dag-engine.ts` 负责拓扑调度、条件跳过与递归重规划——替代旧版写死的四阶段顺序。
 - **规范校核走硬逻辑**：抗震等级、位移角限值、耐火极限等判定基于结构化规则表（if-else 规则引擎），不依赖向量检索的模糊匹配。
 - **完整推理轨迹可溯源**：`trace-engine.ts` 记录每个 Agent 的思考、判定依据、引用的规范条款与计算过程，界面以时间线形式呈现，评审可见"为什么是这个结论"。
 - **反思 + 迭代回环**：总工评审会对推荐结果进行自我质疑（风险点、触发重算条件），体现真正的 Agent 决策回路而非一次性输出。
@@ -103,6 +120,21 @@ npm run build:local
 node scripts/build-gh-pages.mjs
 ```
 
+### 回归验证（七套，共 274 项断言）
+
+```bash
+npm run typecheck            # TypeScript 类型检查
+npm run lint:eslint          # ESLint（仅 src）
+
+npm run verify:norm          # 规范判定层（30 项）
+npm run verify:domain        # 领域模型（22 项）
+npm run verify:decision      # 决策裁定层（24 项）
+npm run verify:counterfactual # 反事实推演（45 项）
+npm run verify:dag           # DAG 引擎：static/dynamic 逐字段一致（12 项）
+npm run verify:entry         # 真实模式管线（13 项）
+npm run verify:agentic       # 专项：回退闭环/乱序/人类在环等（128 项）
+```
+
 > **平台说明**
 > - `npm run dev` / `npm run build` 为妙搭平台专用命令（依赖 bash/rsync），本地请使用 `dev:local` / `build:local`（跨平台通用）。
 > - 首次在 Windows 上 `npm install` 后若构建报缺 `rolldown` / `lightningcss` / `tailwindcss oxide` 平台二进制，执行：
@@ -113,15 +145,26 @@ node scripts/build-gh-pages.mjs
 
 ```
 src/
-├── agent/                # ★ 多 Agent 管线核心（本作品创新点）
+├── agent/                # ★ 多 Agent 智能体核心（本作品创新点）
+│   ├── dag-engine.ts     # DAG 执行引擎：拓扑调度/条件跳过/递归重规划（模块①）
+│   ├── planner.ts        # Planner：生成 DAG 任务计划（规划/执行分离）
 │   ├── intent.ts         # 意图理解 Agent：参数解析/补全/模式识别
-│   ├── pipeline.ts       # 方案创作工程师：候选体系生成
-│   ├── real-engine.ts    # 规范校核工程师：规则引擎逐条判定
-│   ├── optimizer.ts      # 经济评估工程师：造价/工期/碳排放多目标
-│   ├── trace-engine.ts   # 推理轨迹引擎：全流程可溯源
-│   ├── tools.ts          # Agent 工具库
+│   ├── pipeline.ts       # 管线入口：static（旧四阶段）/ dynamic（DAG）双模式
+│   ├── real-engine.ts    # 真实模式推理引擎：function calling 循环
+│   ├── trace-engine.ts   # 演示轨迹引擎：确定性脚本、全流程可溯源
+│   ├── optimizer.ts      # 经济评估：造价/工期/碳排放多目标
+│   ├── tools.ts          # Agent 工具库（12 个零幻觉计算工具）
+│   ├── decision.ts       # 决策裁定层（强制性条文 > 锁定 > LLM > 评分兜底）
+│   ├── scoring.ts        # 加权评分
 │   ├── types.ts          # 领域类型定义
-│   └── index.ts          # Agent 管线入口
+│   └── index.ts          # Agent 引擎入口
+├── data/                 # ★ 领域数据与规则引擎
+│   ├── code-rules.ts     # 规范规则层（声明式，可执行阈值）
+│   ├── code-knowledge.ts # 规范知识库（规则层投影）
+│   ├── norm-evaluator.ts # 规范求值器
+│   ├── scheme-evaluator.ts # 方案评估器
+│   ├── counterfactual.ts # 反事实推演引擎（what-if）
+│   └── structure.ts      # 结构体系库与领域模型
 ├── pages/                # 页面
 │   ├── HomePage/         # 主工作台（参数录入/方案生成/对比分析/智能问答）
 │   ├── RuntimeVerify/    # Agent 管线运行时验证报告（/verify）
