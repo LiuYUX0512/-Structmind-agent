@@ -249,7 +249,7 @@ function SchemesSection({
           <Card className="corner-marks border-dashed border-2 border-border/60 bg-card/30 py-16">
             <CardContent className="flex flex-col items-center justify-center text-center">
               <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                <Sparkles className="size-8" strokeWidth={1.5} />
+                <Building2 className="size-8" strokeWidth={1.5} />
               </div>
               <p className="mb-1 text-lg font-semibold text-foreground">Agent 工作台就绪</p>
               <p className="max-w-md text-sm text-muted-foreground">

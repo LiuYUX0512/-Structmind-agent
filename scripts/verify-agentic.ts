@@ -847,7 +847,7 @@ async function scenarioUiHealth() {
   checks.push(['雷达 tooltip 维度数值 formatter', cmpSrc.includes("RADAR_DIMENSIONS.map((d, i)") && cmpSrc.includes('rows.join'), 'radar tooltip ok']);
   checks.push(['雷达 hover 强调（线宽/顶点光晕）', cmpSrc.includes('emphasis: {') && cmpSrc.includes('shadowBlur'), 'radar emphasis ok']);
   checks.push(['雷达极坐标网格增强', cmpSrc.includes("'rgba(15,76,129,0.28)'"), 'radar grid ok']);
-  checks.push(['造价大屏数字（CountUp+font-mono+色块）', cmpSrc.includes('CountUpOnView') && cmpSrc.includes('text-[52px]') && cmpSrc.includes('border-primary/25'), 'big cost ok']);
+  checks.push(['造价大屏数字（CountUp+数字英雄级+色块）', cmpSrc.includes('CountUpOnView') && cmpSrc.includes('text-hero-number') && cmpSrc.includes('border-primary/25'), 'big cost ok']);
   checks.push(['预算对比绿/红着色', cmpSrc.includes('低于预算') && cmpSrc.includes('超出预算'), 'budget color ok']);
 
   // 11e. 视觉包装第 11-15 项：鼠标光晕 / 厚实按钮 / 加载生长 / 参数专家感 / 弥散投影

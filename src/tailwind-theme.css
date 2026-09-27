@@ -709,6 +709,16 @@
 }
 
 /* ============================================================
+ * P2 动效纪律：全局键盘焦点环（amber 2px 描边 + 2px offset，无障碍）
+ * 所有可交互元素 Tab 聚焦时统一高亮，便于评委键盘演示
+ * ============================================================ */
+:where(button, a, input, select, textarea, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid var(--amber, #e8930c);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================================
  * P0-1 设计系统：打印样式兜底
  * 白底、去阴影、去动画、保留配色（print-color-adjust: exact）
  * 主界面隐藏/报告视图显示由 HomePage 内联 @media print 负责

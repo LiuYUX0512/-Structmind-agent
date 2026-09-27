@@ -69,7 +69,7 @@ function MetacognitionPanel({ metacognition, confidence, risks }: MetacognitionP
   const durations = Object.entries(metrics.nodeDurations).map(([k, ms]) => ({ agent: k, seconds: ms / 1000 }));
 
   return (
-    <div className="rounded-lg border border-border/50 bg-card/40 p-4 backdrop-blur-sm">
+    <div className="glass-card p-card">
       {/* 标题 */}
       <div className="mb-4 flex items-center gap-2">
         <BrainCircuit className="size-4 text-gold" />

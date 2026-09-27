@@ -334,18 +334,33 @@ function ComparisonSection({
                i === 0
                  ? CHART_SEMANTIC.warning
                  : CHART_COLORS[(i - 1) % (CHART_COLORS.length - 1)];
-             return {
-               name: item.name,
-               value: item.values,
-               areaStyle: { opacity: i === 0 ? 0.25 : 0.12 },
-               lineStyle: { width: i === 0 ? 2.5 : 1.5, color },
-               itemStyle: { color },
-               emphasis: {
-                 lineStyle: { width: 3.5, color },
-                 itemStyle: { color, borderColor: color, borderWidth: 2.5, shadowBlur: 12, shadowColor: 'rgba(15,76,129,0.35)' },
-                 areaStyle: { opacity: 0.4 },
-               },
-             };
+            return {
+              name: item.name,
+              value: item.values,
+              // 渐变填充：推荐方案 amber 渐变、其余 teal 渐变（极淡，不抢视线）
+              areaStyle: {
+                color: {
+                  type: 'linear',
+                  x: 0, y: 0, x2: 1, y2: 1,
+                  colorStops: i === 0
+                    ? [
+                        { offset: 0, color: 'rgba(245,158,11,0.30)' },
+                        { offset: 1, color: 'rgba(15,76,129,0.06)' },
+                      ]
+                    : [
+                        { offset: 0, color: 'rgba(18,165,181,0.28)' },
+                        { offset: 1, color: 'rgba(15,76,129,0.05)' },
+                      ],
+                },
+              },
+              lineStyle: { width: i === 0 ? 2.5 : 1.5, color },
+              itemStyle: { color },
+              emphasis: {
+                lineStyle: { width: 3.5, color },
+                itemStyle: { color, borderColor: color, borderWidth: 2.5, shadowBlur: 12, shadowColor: 'rgba(15,76,129,0.35)' },
+                areaStyle: { color: 'rgba(245,158,11,0.45)' },
+              },
+            };
            }),
          },
        ],
@@ -877,7 +892,7 @@ function ComparisonSection({
                 <div className="text-center">
                   <div className="font-mono text-[9px] tracking-wider text-muted-foreground">造价（元/㎡）</div>
                   <div
-                    className={`data-number flex items-baseline justify-center gap-1 rounded-md border px-3 py-1.5 font-mono text-[52px] font-black leading-none md:text-[64px] ${
+                    className={`text-hero-number flex items-baseline justify-center gap-1 rounded-md border px-3 py-1.5 ${
                       projectParams?.budget
                         ? recommendedScheme.metrics.cost <= projectParams.budget
                           ? 'border-success/40 bg-success/10 text-success'

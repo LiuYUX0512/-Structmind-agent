@@ -52,7 +52,7 @@ function MemoryPanel({ logs }: MemoryPanelProps) {
   if (totalEvents === 0) return null;
 
   return (
-    <div className="rounded-lg border border-gold/25 bg-card/40 backdrop-blur-sm">
+    <div className="glass-card">
       {/* 标题栏（可折叠） */}
       <button
         type="button"
