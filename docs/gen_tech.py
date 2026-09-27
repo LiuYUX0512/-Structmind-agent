@@ -276,7 +276,8 @@ add_para(doc, "面向建筑方案阶段的多智能体协同结构选型与优�
 
 add_para(doc, "线上 Demo：https://liuyux0512.github.io/-Structmind-agent/", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 add_para(doc, "提交日期：2026 年 9 月 28 日", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
-add_para(doc, "团队名称 / 成员：＿＿＿＿＿＿＿＿（请填写）", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
+add_para(doc, "团队成员：刘宇翔（负责人）、李国扬、吕勇宽、张盛涵", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
+add_para(doc, "所属学院：土木工程 · 指导教师：无", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 
 # ---------- 目录分节 ----------
 sec2 = doc.add_section(WD_SECTION.NEW_PAGE)
@@ -395,8 +396,10 @@ add_para(doc, "随后工程师可在“专家干预面板”锁定结构体系�
 add_heading(doc, "团队分工", 1)
 add_table(doc, [
     ["成员", "分工内容", "AI 参与环节"],
-    ["＿＿＿（请填写）", "产品定位、结构方案逻辑、规范口径；前端开发、Agent 管线、3D 可视化", "通过 AI 智能体完成核心代码生成、重构、评审与修复；AI 提出规范校核与多目标优化方案并经人工确认落地"],
-    ["＿＿＿（请填写）", "界面设计与交互、文档与演示、答辩准备", "使用 AI 辅助排版与文案，人工修订验证"],
+    ["刘宇翔（负责人）", "产品架构与系统设计；工程规则引擎、多智能体管线、前端开发与 3D 可视化", "通过 AI 智能体完成核心代码生成、重构、评审与修复；AI 提出规范校核与多目标优化方案并经人工确认落地"],
+    ["李国扬", "界面设计与交互、演示视频录制", "使用 AI 辅助界面设计与文案，人工修订验证"],
+    ["吕勇宽", "规范口径梳理、测试验证与文档排版", "使用 AI 辅助规范条文整理与文档排版，人工复核"],
+    ["张盛涵", "演示材料、答辩准备与项目资料整理", "使用 AI 辅助内容组织与文案，人工修订验证"],
 ], header_fill="0F4C81")
 add_para(doc, "说明：本项目为 AI 智能体挑战赛参赛作品，开发全程采用“人机协同”模式——AI 负责代码生成、数据与排版辅助，人工负责方案逻辑、规范核验与最终决策，所有环节均经人工复核验证。具体分工、AI 参与环节及修改验证过程，详见随附《人机协同履历表》。")
 
