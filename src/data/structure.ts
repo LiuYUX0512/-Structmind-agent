@@ -139,6 +139,20 @@ export interface IRecommendation {
   reason: string;
   overallScore: number;
   weightedScores?: { schemeId: string; score: number; breakdown: Record<string, number> }[];
+  /** P1-1 决策溯源：最终推荐是谁定的 */
+  decisionSource?: 'llm' | 'constraint-override' | 'human-lock' | 'score-fallback' | 'trace';
+  /** P1-1：裁定说明——为什么是它，以及为什么可能不是评分最高的那个 */
+  decisionNote?: string;
+  /** P1-1：纯评分口径下的首选（与最终裁定对照展示） */
+  scoreTopSchemeId?: string;
+  /** P1-1：大模型的原始裁定（被否决时也保留） */
+  llmChoiceSchemeId?: string;
+  /** P1-1：大模型自评置信度 */
+  llmConfidence?: 'high' | 'medium' | 'low';
+  /** P1-1：大模型给出的决定性因素 */
+  decisiveFactor?: string;
+  /** P1-1：触发否决的强制性条文清单 */
+  hardConstraintViolations?: string[];
 }
 
 export interface IChatMessage {

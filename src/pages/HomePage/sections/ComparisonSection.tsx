@@ -118,6 +118,86 @@ const RADAR_DIMENSIONS = [
   { key: 'carbonScore', label: '低碳性能', max: 10 },
 ];
 
+// ============ P1-1 决策溯源 ============
+// 最终推荐不再是一个凭空出现的结论：它是谁定的、有没有被规范否决过、否决依据哪条条文，
+// 都必须让工程师一眼看到。这既是对「AI 黑箱」最直接的回应，也是硬约束防线存在的证据。
+
+const DECISION_SOURCE_META: Record<
+  string,
+  { label: string; tone: string; hint: string }
+> = {
+  llm: {
+    label: '总工裁定',
+    tone: 'border-teal/40 bg-teal/10 text-teal',
+    hint: '由总工 Agent 在候选内独立裁定，非单纯取评分最高者',
+  },
+  'constraint-override': {
+    label: '强制回退',
+    tone: 'border-destructive/50 bg-destructive/10 text-destructive',
+    hint: '原裁定违反强制性条文，被代码否决后改判',
+  },
+  'human-lock': {
+    label: '工程师锁定',
+    tone: 'border-info/40 bg-info/10 text-info',
+    hint: '按人工锁定优先采用，AI 不得替换',
+  },
+  'score-fallback': {
+    label: '评分兜底',
+    tone: 'border-muted-foreground/40 bg-muted/40 text-muted-foreground',
+    hint: '未取得有效裁定，按综合评分首选推荐',
+  },
+  trace: {
+    label: '演示轨迹',
+    tone: 'border-muted-foreground/40 bg-muted/40 text-muted-foreground',
+    hint: '确定性演示脚本产出',
+  },
+};
+
+function DecisionTraceLine({ recommendation }: { recommendation: IRecommendation }) {
+  const meta = DECISION_SOURCE_META[recommendation.decisionSource ?? ''] ?? null;
+  if (!meta) return null;
+  const violations = recommendation.hardConstraintViolations ?? [];
+
+  return (
+    <div className="mt-2 space-y-1.5 rounded-md border border-amber/25 bg-amber/[0.06] px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono text-[10px] tracking-widest text-muted-foreground">
+          DECISION TRACE · 决策溯源
+        </span>
+        <span className={`rounded border px-1.5 py-0.5 text-[11px] font-medium ${meta.tone}`}>
+          {meta.label}
+        </span>
+        {recommendation.llmConfidence && (
+          <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+            置信度：{recommendation.llmConfidence === 'high' ? '高' : recommendation.llmConfidence === 'medium' ? '中' : '低'}
+          </span>
+        )}
+        {recommendation.scoreTopSchemeId &&
+          recommendation.scoreTopSchemeId !== recommendation.schemeId && (
+            <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">
+              评分首选：{recommendation.scoreTopSchemeId}
+            </span>
+          )}
+      </div>
+      {recommendation.decisionNote && (
+        <p className="text-xs leading-relaxed text-foreground/85">{recommendation.decisionNote}</p>
+      )}
+      {violations.length > 0 && (
+        <ul className="space-y-0.5">
+          {violations.map((v) => (
+            <li key={v} className="text-[11px] leading-relaxed text-destructive">
+              ⛔ {v}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!recommendation.decisionNote && (
+        <p className="text-xs leading-relaxed text-muted-foreground">{meta.hint}</p>
+      )}
+    </div>
+  );
+}
+
 function ComparisonSection({
   schemes,
   recommendation,
@@ -781,6 +861,9 @@ function ComparisonSection({
                     </span>
                     ，需在方案阶段重点关注。
                   </p>
+                  {recommendation.decisionSource && (
+                    <DecisionTraceLine recommendation={recommendation} />
+                  )}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-3 border-t border-amber/20 pt-3 md:border-l md:border-t-0 md:pl-6 md:pt-0">

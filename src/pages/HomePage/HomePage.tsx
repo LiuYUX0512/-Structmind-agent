@@ -815,7 +815,7 @@ ${dis || '- （待补充）'}
           setSelectedSchemeId(result.recommended.schemeId);
         }
 
-        // 设置推荐
+        // 设置推荐（P1-1：一并带上决策溯源，让「谁定的、为什么」在界面上可见）
         setRecommendation({
           schemeId: result.recommended.schemeId,
           schemeName: result.recommended.schemeName,
@@ -827,6 +827,27 @@ ${dis || '- （待补充）'}
             score: r.score,
             breakdown: r.breakdown,
           })),
+          ...(result.recommended.decisionSource
+            ? { decisionSource: result.recommended.decisionSource }
+            : {}),
+          ...(result.recommended.decisionNote
+            ? { decisionNote: result.recommended.decisionNote }
+            : {}),
+          ...(result.recommended.scoreTopSchemeId
+            ? { scoreTopSchemeId: result.recommended.scoreTopSchemeId }
+            : {}),
+          ...(result.recommended.llmChoiceSchemeId
+            ? { llmChoiceSchemeId: result.recommended.llmChoiceSchemeId }
+            : {}),
+          ...(result.recommended.llmConfidence
+            ? { llmConfidence: result.recommended.llmConfidence }
+            : {}),
+          ...(result.recommended.decisiveFactor
+            ? { decisiveFactor: result.recommended.decisiveFactor }
+            : {}),
+          ...(result.recommended.hardConstraintViolations
+            ? { hardConstraintViolations: result.recommended.hardConstraintViolations }
+            : {}),
           });
 
         // 工程历史版本：保存本版参数+结果到 localStorage（最多 10 版）
