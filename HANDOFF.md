@@ -47,7 +47,11 @@
 ## 6. 操作要求
 
 1. 每轮改完**必须全量自测**：typecheck、eslint、主回归、专项回归，再核对线上 demo。**不能越改越坏**。
-2. 改完**同步推送 GitHub main 分支**（提交身份 `LiuYUX0512 / 5399301912@163.com`；连不上就直连，或走 `http://127.0.0.1:7890` 代理）。
+2. 改完**同步推送 GitHub main 分支**。⚠️ **本机 git 全局代理常指向不可用的 `127.0.0.1`**，直连 push 会报 `Failed to connect ... over proxy`——**这不是没有登录凭据，别误判**。直接用清代理直连命令（仓库公开 + 本机凭据已生效，无需 token）：
+   ```
+   git -c http.proxy= -c https.proxy= -c user.name="LiuYUX0512" -c user.email="5399301912@163.com" push origin main
+   ```
+   仅当这条仍报用户名/密码错误时，才需要把账号加为仓库协作者或提供带 repo 权限的 token。
 3. **不要把 API Key、内部配置、占位符漏进公开产物**；交付前核对是否泄漏。
 4. 验收标准：可正常复现运行的 Demo + 完整参赛材料 + 所有改动已同步回仓库。
 
