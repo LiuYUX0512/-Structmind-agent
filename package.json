@@ -16,6 +16,7 @@
     "verify:norm": "vite build --config scripts/vite-verify-norm.config.ts && node scripts/verify-norm-out/verify-norm.js",
     "verify:domain": "vite build --config scripts/vite-verify-domain.config.ts && node scripts/verify-domain-out/verify-domain.js",
     "verify:decision": "vite build --config scripts/vite-verify-decision.config.ts && node scripts/verify-decision-out/verify-decision.js",
+    "verify:counterfactual": "vite build --config scripts/vite-verify-counterfactual.config.ts && node scripts/verify-counterfactual-out/verify-counterfactual.js",
     "verify:entry": "vite build --config scripts/vite-verify.config.ts && node scripts/verify-out/verify-entry.js",
     "verify:agentic": "vite build --config scripts/vite-verify-agentic.config.ts && node scripts/verify-out/verify-agentic.js"
   },

@@ -10,9 +10,87 @@ import { TraceEngine } from './trace-engine';
 import type { IProjectParams, IWeightConfig } from '@/data/structure';
 import { MOCK_WEIGHT_CONFIG, STRUCTURE_SYSTEM_LIBRARY } from '@/data/structure';
 import { executeToolByName } from './tools';
+import {
+  resolveInterventionFromText,
+  diffParams,
+  simulateCounterfactual,
+  describeChange,
+  type ICounterfactualReport,
+  type ICounterfactualResult,
+} from '@/data/counterfactual';
 import { logger } from '@lark-apaas/client-toolkit-lite';
 
 // ============ 规则引擎意图解析（演示模式） ============
+
+/**
+ * 反事实推演（what-if）识别。
+ *
+ * 判定策略（两段式，必须同时满足）：
+ *   1) 假设语气：出现「如果/假如/要是/假设/倘若」或「…会怎样/怎么样/呢？」的假设问句形态
+ *   2) 可解析的干预：句中含至少一个可识别的参数字段改动（层数/体系/烈度/场地/跨度/预算/高度）
+ *
+ * 只满足①不满足② → 返回 null，交给后续澄清机制（不瞎猜）。
+ * 这样避免与 ASK_BUDGET_CUT（"预算砍 20% 会怎样"）冲突：
+ *   预算削减有专门的更成熟处理器，本函数显式排除纯预算表达。
+ *
+ * @returns WHAT_IF 意图，或 null（不匹配）
+ */
+function matchWhatIf(msg: string, lowerMsg: string): IIntentResult | null {
+  void lowerMsg;
+  // 假设语气词
+  const hypothesis = /如果|假如|要是|假设|倘若|若是|万一|换个|换一个/.test(msg);
+  // 假设问句形态：「会怎样/怎么样/会变/呢/好不好/合不合适/行不行/能否/可不可以」+ 问号或结尾语气词
+  const askForm =
+    /会(怎样|怎么样|如何|变成|不会)|怎么样|怎么变|会有什么|有何影响|影响(大|多)吗/.test(msg) ||
+    /(呢|吗|吧)\s*[?？]?\s*$/.test(msg);
+
+  const isHypothesis = hypothesis || (askForm && /改|换|降|升|增|减|调|变/.test(msg));
+  if (!isHypothesis) return null;
+
+  // 显式排除「预算砍多少」类——有更专门的 ASK_BUDGET_CUT 处理器
+  if (/预算[\s\S]{0,10}?(砍|降|减少|压缩|削减|省)\s*\d*\s*%?/.test(msg) && !/层|体系|结构|烈度|场地|跨度|高度/.test(msg)) {
+    return null;
+  }
+
+  // 试解析干预
+  const parsed = resolveInterventionFromText(msg, MOCK_WHATIF_BASELINE);
+  if (!parsed) return null;
+
+  const changes: Record<string, string | number> = {};
+  for (const c of diffParams(MOCK_WHATIF_BASELINE, parsed.params)) {
+    const v = parsed.params[c.field];
+    if (v !== undefined) changes[c.field] = v as string | number;
+  }
+  if (Object.keys(changes).length === 0) return null;
+
+  return {
+    intent: EIntentType.WHAT_IF,
+    whatIfChanges: changes,
+    confidence: 0.85,
+    rawMessage: msg,
+  };
+}
+
+/**
+ * what-if 解析基线：规则层只是「识别 + 抽取字段」，不需要真实参数值，
+ * 但 resolveInterventionFromText 需要一个基线来做合法性判断（如"与当前值不同"）。
+ * 这里用一组中性默认值；真正的基线在处理器里由 context.currentParams 提供，
+ * 解析结果只取「被改动的字段」而丢弃具体比较结论。
+ */
+const MOCK_WHATIF_BASELINE: IProjectParams = {
+  buildingType: 'residential',
+  floors: 30,
+  area: 15000,
+  structurePreference: 'shearwall',
+  seismicIntensity: '8',
+  soilCategory: 'Ⅱ',
+  geologyType: 'clay',
+  mainSpan: 8,
+  budget: 4500,
+  windPressure: '0.45',
+  snowPressure: '0.4',
+  fortificationCategory: '标准设防',
+};
 
 /**
  * 基于关键词 + 数字提取的规则意图解析
@@ -52,6 +130,13 @@ export function parseIntentByRules(message: string): IIntentResult {
       rawMessage: msg,
     };
   }
+
+  // 0. WHAT_IF — 反事实推演（假设性提问，优先级最高）
+  // 「如果把层数从 30 降到 20 会怎样」「剪力墙换成框剪呢」「假如烈度降到 7 度」
+  // 必须置于 CHANGE_PARAMS 之前：反事实提问里同样含数字与「改成/换成」，
+  // 若不先拦，会被误判为「真的执行修改」，用户只是想看推演结果。
+  const whatIf = matchWhatIf(msg, lowerMsg);
+  if (whatIf) return whatIf;
 
   // 1. CHANGE_PARAMS — 参数修改类
   const floorMatch = msg.match(/(\d+)\s*层/);
@@ -352,6 +437,9 @@ export class IntentEngine {
         return this.handleAskSteelRatio(intent);
       case EIntentType.ASK_SECTION_SIZE:
         return this.handleAskSectionSize(intent);
+
+      case EIntentType.WHAT_IF:
+        return this.handleWhatIf(intent);
 
       case EIntentType.UNKNOWN:
       default:
@@ -977,6 +1065,195 @@ export class IntentEngine {
     lines.push('> 💡 以上风险评估基于概念级公式估算，具体项目需由注册结构工程师主持，采用专业软件逐项验算。');
 
     return { intent, reply: lines.join('\n') };
+  }
+
+  /**
+   * WHAT_IF：反事实推演（假设性提问）
+   *
+   * 与 handleChangeParams 的本质区别：
+   *   changeParams 会真的改参数并重跑管线（用户要执行）；
+   *   whatIf 只做推演（用户想看结果），**绝不改写 context.currentParams**。
+   *   因此若用户看到推演结果满意，仍需要明确说「就按这个改」才会真正执行。
+   */
+  private handleWhatIf(intent: IIntentResult) {
+    const baseline = this.context.currentParams;
+    const rawChanges = intent.whatIfChanges ?? {};
+
+    // 剥离内部标记，只留真正的参数干预
+    const changes: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(rawChanges)) {
+      if (k.startsWith('__')) continue;
+      changes[k] = v;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      // 理论不可达（解析层已保证非空），兜底给澄清
+      return {
+        intent,
+        reply: [
+          '我理解您想做一个「如果…会怎样」的推演，但没能从问题里识别出具体要改的参数。',
+          '',
+          '您可以这样说：',
+          '- 「如果把层数从 30 降到 20 会怎样」',
+          '- 「剪力墙换成框剪呢」',
+          '- 「假如设防烈度降到 7 度」',
+          '- 「场地类别改成 Ⅲ 类会有什么影响」',
+        ].join('\n'),
+      };
+    }
+
+    // 建筑高度联动由推演引擎统一归一化处理（见 counterfactual.ts normalizeHeightLinkage），
+    // 这里不再重复干预，避免两套逻辑互相打架。
+    const afterParams: IProjectParams = { ...baseline, ...changes };
+
+    // 候选体系：优先用上一轮排序结果；没有则用全部已知体系
+    const ranking = this.context.lastResult?.ranking ?? [];
+    const systemIds =
+      ranking.length > 0
+        ? ranking.map((r) => r.schemeId)
+        : STRUCTURE_SYSTEM_LIBRARY.map((s) => s.id);
+    const recId = this.context.lastResult?.recommended?.schemeId;
+
+    const report = simulateCounterfactual(
+      intent.rawMessage,
+      baseline,
+      afterParams,
+      systemIds,
+      recId
+    );
+
+    const reply = this.renderCounterfactual(report);
+    return { intent, reply };
+  }
+
+  /** 把反事实推演报告渲染成 Markdown（对齐 handleAskBudgetCut 的表格化风格） */
+  private renderCounterfactual(report: ICounterfactualReport): string {
+    const lines: string[] = [];
+    const changeText = report.changes.map((c) => `${c.label} ${c.from} → ${c.to}`).join('、');
+
+    lines.push('## 反事实推演：如果把条件改成这样会怎样');
+    lines.push('');
+    lines.push(`> ℹ️ 这是一次**假设性推演**，不会真的改动您的方案参数。推演结果基于当前方案池重新计算，口径与主流程完全一致（复用同一评估引擎）。`);
+    lines.push('');
+
+    // 干预清单
+    lines.push('### 假设的调整');
+    lines.push('');
+    lines.push('| 字段 | 当前 | 假设 |');
+    lines.push('|------|------|------|');
+    report.changes.forEach((c) => {
+      lines.push(`| ${c.label} | ${c.from} | **${c.to}** |`);
+    });
+    lines.push('');
+    if (report.inferenceNotes.length > 0) {
+      report.inferenceNotes.forEach((n) => lines.push(`> 📝 ${n}`));
+      lines.push('');
+    }
+
+    // 逐体系结论
+    lines.push('### 各方案在假设条件下的表现');
+    lines.push('');
+    for (const r of report.results) {
+      lines.push(this.renderOneSystem(r, changeText));
+      lines.push('');
+    }
+
+    // 全局结论
+    lines.push('### 汇总结论');
+    lines.push('');
+    if (report.newlyViolating.length > 0) {
+      const names = report.results
+        .filter((r) => report.newlyViolating.includes(r.systemId))
+        .map((r) => r.systemName);
+      lines.push(`- ⛔ **${names.join('、')}** 在假设条件下出现了新的规范不满足项，需谨慎。`);
+    }
+    if (report.compliantAfter.length > 0) {
+      const names = report.results
+        .filter((r) => report.compliantAfter.includes(r.systemId))
+        .map((r) => r.systemName);
+      lines.push(`- ✅ **${names.join('、')}** 在假设条件下仍满足全部判定项。`);
+    }
+    if (report.hasCriticalFlip) {
+      lines.push(`- ⚠️ 本次推演**触及强制性条文**（上表中标记 ⛔ 的项），这类判定不是优化建议而是规范底线，超出即不可行。`);
+    }
+    lines.push('');
+    lines.push('> 💡 推演只反映参数联动对指标与规范判定的影响，不含施工图阶段的构造、节点与配筋深化。若您认可某个假设情形，可以说「就按这个改」，我会真正执行参数修改并重跑方案比选。');
+
+    return lines.join('\n');
+  }
+
+  /** 单个体系的反事实结论块 */
+  private renderOneSystem(r: ICounterfactualResult, changeText: string): string {
+    void changeText;
+    const lines: string[] = [];
+    const badge =
+      r.verdict === 'improved' ? '✅ 改善' :
+      r.verdict === 'worsened' ? '❌ 变差' :
+      r.verdict === 'mixed' ? '⚖️ 有得有失' : '➖ 基本持平';
+
+    const recTag = r.isCurrentRecommendation ? '（当前推荐）' : '';
+    lines.push(`#### ${r.systemName}${recTag} — ${badge}`);
+    lines.push('');
+    lines.push(r.summary);
+    lines.push('');
+
+    // 指标对比表（只列有变化的，全无变化则说明）
+    const changed = r.metricDeltas.filter((d) => d.direction !== 'neutral');
+    if (changed.length > 0) {
+      lines.push('| 指标 | 假设前 | 假设后 | 变化 |');
+      lines.push('|------|--------|--------|------|');
+      changed.forEach((d) => {
+        const arrow = d.direction === 'good' ? '📈 改善' : '📉 变差';
+        const pct = d.deltaPercent !== null ? `（${d.deltaPercent > 0 ? '+' : ''}${d.deltaPercent}%）` : '';
+        const sign = d.delta > 0 ? '+' : '';
+        lines.push(
+          `| ${d.label} | ${d.before.toLocaleString()} ${d.unit} | ${d.after.toLocaleString()} ${d.unit} | ${sign}${d.delta.toLocaleString()} ${d.unit}${pct} ${arrow} |`
+        );
+      });
+      lines.push('');
+      // 归因（只对前 2 个重要变化解释，避免冗长）
+      const top = changed.slice(0, 2);
+      top.forEach((d) => lines.push(`> 归因：${d.attribution}。`));
+      lines.push('');
+    } else {
+      lines.push('（该方案的各项指标基本不受此次假设影响）');
+      lines.push('');
+    }
+
+    // 规范判定翻转
+    if (r.checkFlips.length > 0) {
+      lines.push('**规范判定变化：**');
+      lines.push('');
+      r.checkFlips.forEach((f) => {
+        // 图标语义：🔴 新问题/加重 | ✅ 问题消除 | ⚪ 提示消除（好事但不涉及违规）
+        const worsened = f.kind === 'new-violation' || f.kind === 'severity-up' || f.kind === 'new-warning';
+        const icon = worsened ? (f.impact === 'critical' ? '⛔' : '⚠️') : f.kind === 'resolved' ? '✅' : '⚪';
+        // 只有「加重」类才标注严重性前缀；“问题消除”类加前缀会造成误导
+        const sevTag = worsened && f.mandatory ? '【强制性】' : '';
+        lines.push(`- ${icon} ${sevTag}${f.evidence}`);
+      });
+      lines.push('');
+    } else if (r.mandatoryViolationsAfter === 0 && r.mandatoryViolationsBefore === 0) {
+      lines.push('**规范判定：** 前后均满足，无翻转。');
+      lines.push('');
+    }
+
+    // 补充：假设后仍存在、但本次未发生变化的既有不满足项。
+    // 若不提示，用户会困惑「总结说还有 2 项不满足，怎么只列了 1 条」。
+    const flippedNames = new Set(r.checkFlips.map((f) => f.name));
+    const unchangedViolations = r.counterfactual.normCompliance.checks.filter(
+      (c) => c.status === 'fail' && !flippedNames.has(c.name)
+    );
+    if (unchangedViolations.length > 0) {
+      lines.push(
+        `**假设后仍存在的不满足项（本次推演未使其变化）：** ${unchangedViolations
+          .map((c) => c.name)
+          .join('、')}`
+      );
+      lines.push('');
+    }
+
+    return lines.join('\n');
   }
 
   /** ASK_BUDGET_CUT：预算大幅削减 */

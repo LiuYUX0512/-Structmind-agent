@@ -312,6 +312,8 @@ export enum EIntentType {
   ASK_STEEL_RATIO = 'ASK_STEEL_RATIO',
   /** 构件截面概念估算（梁高/柱截面） */
   ASK_SECTION_SIZE = 'ASK_SECTION_SIZE',
+  /** 反事实推演（what-if）：假设改动某参数会怎样 */
+  WHAT_IF = 'WHAT_IF',
   UNKNOWN = 'UNKNOWN',
 }
 
@@ -328,6 +330,8 @@ export interface IIntentResult {
   codeQuery?: string;
   /** 预算削减比例（ASK_BUDGET_CUT 时，百分比 1-100） */
   budgetCutPercent?: number;
+  /** 反事实推演的参数干预（WHAT_IF 时），由意图层解析后交给推演引擎 */
+  whatIfChanges?: Record<string, string | number>;
   /** 置信度 0-1 */
   confidence: number;
   /** 原始用户消息 */

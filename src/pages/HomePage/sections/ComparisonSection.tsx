@@ -1951,6 +1951,23 @@ function ComparisonSection({
                 ),
               )}
             </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <span className="text-xs font-medium text-primary/80">反事实推演：</span>
+              {[
+                '如果把层数从 30 降到 20 会怎样',
+                '剪力墙换成框剪会怎么样',
+                '假如设防烈度降到 7 度',
+              ].map((cmd) => (
+                <button
+                  key={cmd}
+                  onClick={() => setOptimizeInput(cmd)}
+                  title="假设性提问不会改动当前参数，只做推演对比"
+                  className="rounded-full border border-primary/30 bg-primary/5 px-3 py-1 text-xs text-primary transition-colors hover:border-primary/60 hover:bg-primary/10"
+                >
+                  {cmd}
+                </button>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
