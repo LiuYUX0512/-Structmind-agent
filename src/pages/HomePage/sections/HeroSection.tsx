@@ -183,7 +183,7 @@ function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPla
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.45, duration: 0.6 }}
-              className="mb-6 flex flex-wrap items-center gap-2"
+              className="mb-6 flex flex-wrap items-center gap-element"
             >
               {capabilities.map((c) => {
                 const Icon = c.icon;
@@ -226,7 +226,7 @@ function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPla
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4, delay: 0.6 + i * 0.1 }}
                     whileHover={{ y: -3, transition: { duration: 0.2 } }}
-                    className={`corner-marks relative flex flex-col items-start gap-2 border glass-blueprint p-4 blueprint-card`}
+                    className={`corner-marks relative flex flex-col items-start gap-element border glass-blueprint p-card blueprint-card`}
                     style={{ borderRadius: '6px' }}
                   >
                     <div className={`flex size-10 items-center justify-center ${colorClass} border`} style={{ borderRadius: '4px' }}>
@@ -304,7 +304,7 @@ function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPla
                 { v: 4, label: '多智能体协同', suffix: '', accent: 'text-teal' },
                 { v: 7, label: '维度比选', suffix: '', accent: 'text-primary' },
                 { v: 16, label: '结构体系库', suffix: '+', accent: 'text-amber' },
-                { v: 3, label: '方案并行比选', suffix: '', accent: 'text-emerald' },
+                { v: 3, label: '方案并行比选', suffix: '', accent: 'text-teal' },
               ].map((s2, si) => (
                 <div key={s2.label} className={`flex flex-col items-start gap-1 ${si > 0 ? 'border-l border-border/60 pl-3' : ''}`}>
                   <CountUpOnView

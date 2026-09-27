@@ -2,7 +2,9 @@
 // 电影级叙事：四 Agent 泳道 + 执行序连线（数据流动虚线动画）+ 节点逐一亮起 + 回退红色弧线
 // EXPORTS: AgentFlowMap
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, Wrench, Clock, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import type { IAgentActionLog, AgentType } from '@/agent/types';
 import { SUB_AGENT_SPECS } from '@/agent/types';
 
@@ -56,7 +58,26 @@ function analyzeNodeStatus(result: unknown): 'pass' | 'warning' | 'fail' | 'neut
   return 'neutral';
 }
 
+/** 边数据叙事：根据上下游 Agent 推断这条边传递了什么数据 */
+function getEdgeLabel(from: FlowNode, to: FlowNode): string {
+  if (to.agent === 'architect') return '打回重新选型';
+  if (from.agent === 'architect' && to.agent === 'code') return '候选方案';
+  if (from.agent === 'architect' && to.agent === 'economist') return '候选方案';
+  if (from.agent === 'code' && to.agent === 'chief') return '校核结论';
+  if (from.agent === 'economist' && to.agent === 'chief') return '评估指标';
+  if (from.agent === 'code' && to.agent === 'economist') return '合规方案';
+  return '';
+}
+
 const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlowMapProps) => {
+  const [selectedStep, setSelectedStep] = useState<number | null>(null);
+
+  // 选中节点的完整日志（侧滑面板证据链）
+  const selectedLog = useMemo(
+    () => logs.find((l) => l.step === selectedStep) ?? null,
+    [logs, selectedStep]
+  );
+
   const nodes = useMemo<FlowNode[]>(() => {
     return logs
       .slice()
@@ -112,6 +133,9 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
       color: string;
       active: boolean;
       path: string;
+      label: string;
+      midX: number;
+      midY: number;
     }> = [];
     for (let i = 1; i < nodes.length; i++) {
       const a = pos[nodes[i - 1].step];
@@ -119,6 +143,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
       if (!a || !b) continue;
       const color = AGENT_FLOW_COLOR[nodes[i].agent];
       const active = isPlaying && (playingStep === nodes[i].step || playingStep === nodes[i - 1].step);
+      const label = getEdgeLabel(nodes[i - 1], nodes[i]);
       let path: string;
       if (a.x === b.x) {
         path = `M ${a.x} ${a.y + 20} L ${b.x} ${b.y - 20}`;
@@ -127,7 +152,16 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
         const my = Math.max(a.y, b.y) - 46;
         path = `M ${a.x} ${a.y + 20} C ${a.x} ${my}, ${b.x} ${my}, ${b.x} ${b.y - 20}`;
       }
-      out.push({ from: a, to: b, color, active, path });
+      out.push({
+        from: a,
+        to: b,
+        color,
+        active,
+        path,
+        label,
+        midX: (a.x + b.x) / 2,
+        midY: Math.max(a.y, b.y) - 52,
+      });
     }
     return out;
   }, [nodes, pos, isPlaying, playingStep]);
@@ -239,15 +273,29 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
 
         {/* 执行序连线 */}
         {links.map((l, i) => (
-          <path
-            key={`l-${i}`}
-            d={l.path}
-            fill="none"
-            stroke={l.color}
-            strokeWidth={1.5}
-            opacity={l.active ? 1 : 0.5}
-            className={l.active ? 'agent-flow-link-active' : undefined}
-          />
+          <g key={`l-${i}`}>
+            <path
+              d={l.path}
+              fill="none"
+              stroke={l.color}
+              strokeWidth={1.5}
+              opacity={l.active ? 1 : 0.5}
+              className={l.active ? 'agent-flow-link-active' : undefined}
+            />
+            {l.label && (
+              <text
+                x={l.midX}
+                y={l.midY}
+                textAnchor="middle"
+                fontSize={8}
+                fontWeight={600}
+                fill={l.color}
+                opacity={0.85}
+              >
+                ⤷ {l.label}
+              </text>
+            )}
+          </g>
         ))}
 
         {/* 节点 */}
@@ -256,19 +304,40 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
           const color = n.isMemory ? '#eab308' : AGENT_FLOW_COLOR[n.agent];
           const isActive = isPlaying && playingStep === n.step;
           const done = !isPlaying || n.step < (playingStep ?? Number.MAX_SAFE_INTEGER);
-          const statusColor =
-            n.status === 'fail' ? '#ef4444' : n.status === 'warning' ? '#f59e0b' : color;
+          const isSelected = selectedStep === n.step;
+          // 四态：待执行(灰) / 执行中(脉冲) / 完成(绿) / 违规(红)
+          const strokeColor = n.status === 'fail'
+            ? '#ef4444'
+            : done
+              ? '#10B981'
+              : isActive
+                ? color
+                : 'rgba(100,116,139,0.5)';
+          const fillColor = isActive
+            ? color
+            : done
+              ? `${color}1a`
+              : 'rgba(100,116,139,0.06)';
           return (
-            <g key={n.step} className={isActive ? 'agent-flow-active' : undefined}>
+            <g
+              key={n.step}
+              className={isActive ? 'agent-flow-active' : undefined}
+              onClick={() => setSelectedStep(isSelected ? null : n.step)}
+              style={{ cursor: 'pointer' }}
+            >
+              {/* 选中高亮环 */}
+              {isSelected && (
+                <rect x={p.x - 26} y={p.y - 20} width={52} height={40} rx={10} fill="none" stroke="#0F4C81" strokeWidth={2} strokeDasharray="4 3" />
+              )}
               <rect
                 x={p.x - 22}
                 y={p.y - 16}
                 width={44}
                 height={32}
                 rx={8}
-                fill={isActive ? color : done ? `${color}1a` : 'rgba(100,116,139,0.06)'}
-                stroke={isActive ? color : statusColor}
-                strokeWidth={isActive ? 2 : 1.2}
+                fill={fillColor}
+                stroke={strokeColor}
+                strokeWidth={isActive || isSelected ? 2 : 1.2}
               />
               {n.status === 'fail' && !isActive && (
                 <circle cx={p.x + 18} cy={p.y - 9} r={4} fill="#ef4444" />
@@ -279,7 +348,7 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
                 textAnchor="middle"
                 fontSize={10}
                 fontWeight={700}
-                fill={isActive ? '#fff' : statusColor}
+                fill={isActive ? '#fff' : strokeColor}
               >
                 {n.agent === 'architect' ? 'A-1' : n.agent === 'code' ? 'A-2' : n.agent === 'economist' ? 'A-3' : 'A-4'}
               </text>
@@ -318,6 +387,87 @@ const AgentFlowMap = ({ logs, playingStep = null, isPlaying = false }: AgentFlow
           );
         })}
       </svg>
+
+      {/* 节点详情侧滑面板（证据链：思考 / 工具调用 / 结果） */}
+      <AnimatePresence>
+        {selectedLog && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            transition={{ duration: 0.25 }}
+            className="mt-3 rounded-lg border border-border/60 bg-card/90 p-card backdrop-blur-md"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-title text-foreground">
+                {AGENT_FLOW_LABEL[selectedLog.agent || 'architect']} · STEP {selectedLog.step}
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedStep(null)}
+                className="rounded-md p-1 text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber"
+                aria-label="关闭详情"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-2 space-y-2 text-xs">
+              {/* 类型标签 */}
+              <span className="inline-flex rounded-sm border border-border/60 bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {selectedLog.type === 'tool_call' ? '工具调用' : selectedLog.type === 'tool_result' ? '工具结果' : selectedLog.type === 'conclusion' ? '结论' : '思考'}
+              </span>
+
+              {/* 内容（思考文本 / 结论） */}
+              {selectedLog.content && (
+                <div className="rounded-md bg-background/60 px-2.5 py-1.5 leading-relaxed text-foreground/80">
+                  {selectedLog.content}
+                </div>
+              )}
+
+              {/* 工具调用参数 */}
+              {selectedLog.type === 'tool_call' && selectedLog.tool && (
+                <div className="rounded-md bg-background/60 px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5 text-[10px] font-medium text-teal">
+                    <Wrench className="size-3" />
+                    工具：{selectedLog.tool}
+                  </div>
+                  {selectedLog.args && Object.keys(selectedLog.args).length > 0 && (
+                    <pre className="mt-1 overflow-auto font-mono text-[10px] text-muted-foreground">
+                      {JSON.stringify(selectedLog.args, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {/* 工具结果 */}
+              {selectedLog.type === 'tool_result' && selectedLog.tool && (
+                <div className="rounded-md bg-background/60 px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5 text-[10px] font-medium text-teal">
+                    <Wrench className="size-3" />
+                    {selectedLog.tool} → 结果
+                  </div>
+                  {(() => {
+                    const r = selectedLog.result as Record<string, unknown> | undefined;
+                    const status = r && typeof r.failCount === 'number' && r.failCount > 0 ? 'fail' : r && typeof r.passCount === 'number' ? 'pass' : 'neutral';
+                    return (
+                      <span className={`mt-1 inline-flex rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${status === 'fail' ? 'bg-destructive/15 text-destructive' : status === 'pass' ? 'bg-success/15 text-success' : 'bg-muted/50 text-muted-foreground'}`}>
+                        {status === 'fail' ? '不符合' : status === 'pass' ? '符合' : '执行完成'}
+                      </span>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* 证据链提示 */}
+              <div className="flex items-center gap-1.5 border-t border-border/50 pt-2 text-[10px] text-muted-foreground">
+                <ArrowDownRight className="size-3" />
+                每一步都可追溯：思考 → 工具调用 → 结果证据链
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

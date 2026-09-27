@@ -9,6 +9,10 @@
  * success    #10B981  规范校核「符合」（功能色，保留，不可改语义）
  * destructive#EF4444  规范校核「不符合」（功能色，保留，不可改语义）
  * warning    #F59E0B  一般性提醒（功能色）
+ *
+ * —— Agent 身份色（功能标识色，类似 success/destructive 的地位，保留不可改）——
+ * architect=teal(#12A5B5) / code=amber(#E8930C) / economist=emerald(#34d399) / chief=gold(#eab308)
+ * 仅限：四 Agent 的节点/徽章/泳道等身份标识；禁止用于其他场景取色。
  * ============================================================
  * 4 级字体体系：text-display（展示）/ text-title（标题）/
  *               text-body（正文）/ text-caption（辅助）
