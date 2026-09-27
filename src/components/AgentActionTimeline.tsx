@@ -22,6 +22,7 @@ import {
   Loader2,
   Network,
   List,
+  Sparkles,
 } from 'lucide-react';
 import type { IAgentActionLog, AgentType } from '@/agent/types';
 import { SUB_AGENT_SPECS } from '@/agent/types';
@@ -447,6 +448,8 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
                   const isFiltered = filterAgent && log.agent !== filterAgent;
 
                   if (log.type === 'think') {
+                    // 记忆 / 元认知日志醒目展示（评委可见「系统在思考、在进化」）
+                    const isMemLog = log.content?.startsWith('[Memory') || log.content?.startsWith('[Metacognition]');
                     return (
                       <div key={log.step} ref={(el) => setItemRef(log.step, el)}>
                         <motion.div
@@ -459,23 +462,27 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
                           className="relative flex gap-3 pl-1"
                         >
                           <div className="relative flex flex-col items-center">
-                            <div className="mt-1.5 size-2 shrink-0 rounded-full bg-teal/70 ring-2 ring-teal/20" />
-                            {!isLast && <div className="w-px flex-1 bg-teal/20" />}
+                            <div className={`mt-1.5 size-2 shrink-0 rounded-full ring-2 ${isMemLog ? 'bg-gold ring-gold/30' : 'bg-teal/70 ring-teal/20'}`} />
+                            {!isLast && <div className={`w-px flex-1 ${isMemLog ? 'bg-gold/20' : 'bg-teal/20'}`} />}
                           </div>
                           <div className="flex-1 pb-3">
                             <div className="mb-1 flex items-center gap-2">
                               <span
-                                className={`timeline-badge inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[9px] font-medium ${agentColorMap[log.agent || 'architect'] || agentColorMap.architect}`}
+                                className={`timeline-badge inline-flex items-center gap-1 border px-1.5 py-0.5 font-mono text-[9px] font-medium ${
+                                  isMemLog
+                                    ? 'border-gold/40 bg-gold/10 text-gold shadow-[0_0_12px_-3px_rgba(234,179,8,0.6)]'
+                                    : agentColorMap[log.agent || 'architect'] || agentColorMap.architect
+                                }`}
                                 style={{ borderRadius: '2px' }}
                               >
-                                <Lightbulb className="size-2.5" />
-                                {getAgentLabel(log.agent)} · 思考
+                                {isMemLog ? <Sparkles className="size-2.5" /> : <Lightbulb className="size-2.5" />}
+                                {isMemLog ? (log.content?.startsWith('[Metacognition]') ? '元认知' : '记忆') : getAgentLabel(log.agent) + ' · 思考'}
                               </span>
                               <span className="font-mono text-[9px] text-muted-foreground/60">
                                 STEP {String(log.step).padStart(2, '0')}
                               </span>
                             </div>
-                            <div className="pres-think-text whitespace-pre-wrap text-xs leading-relaxed text-foreground/80">
+                            <div className={`whitespace-pre-wrap text-xs leading-relaxed ${isMemLog ? 'rounded-md border border-gold/20 bg-gold/[0.06] px-2.5 py-1.5 font-medium text-gold' : 'pres-think-text text-foreground/80'}`}>
                               {log.content}
                             </div>
                           </div>

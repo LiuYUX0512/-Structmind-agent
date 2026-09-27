@@ -19,6 +19,7 @@ import HeroSection from './sections/HeroSection';
 import ParamsSection from './sections/ParamsSection';
 import SchemesSection from './sections/SchemesSection';
 import ComparisonSection from './sections/ComparisonSection';
+import MetacognitionPanel from '@/components/MetacognitionPanel';
 import { DebatePanel } from '@/components/DebatePanel';
 import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
@@ -195,6 +196,7 @@ export default function HomePage() {
   const [lockedParams, setLockedParams] = useState<Partial<Record<keyof IProjectParams, boolean>>>({});
   const [schemes, setSchemes] = useState<IStructureScheme[]>([]);
   const [recommendation, setRecommendation] = useState<IRecommendation | null>(null);
+  const [metacognition, setMetacognition] = useState<IAgentPipelineResult['metacognition']>(undefined);
   const [chatMessages, setChatMessages] = useState<IChatMessage[]>([]);
   const [selectedSchemeId, setSelectedSchemeId] = useState<string | null>(null);
   const [playerFinished, setPlayerFinished] = useState(false);
@@ -241,6 +243,7 @@ export default function HomePage() {
     apiKey: '',
     mode: 'auto' as 'auto' | 'real' | 'demo',
     compressThreshold: 4000,
+    enableExperienceLoop: true,
   });
   const [currentIntent, setCurrentIntent] = useState<IIntentResult | null>(null);
   const [agentContext, setAgentContext] = useState<IConversationContext | null>(null);
@@ -278,6 +281,7 @@ export default function HomePage() {
           apiKey: engineCfg.apiKey || '',
           mode: (engineCfg.mode === 'trace' ? 'demo' : (engineCfg.mode || 'auto')) as 'auto' | 'real' | 'demo',
           compressThreshold: engineCfg.compressThreshold ?? 4000,
+          enableExperienceLoop: engineCfg.enableExperienceLoop !== false,
         });
       }
 
@@ -784,8 +788,14 @@ ${dis || '- （待补充）'}
               apiKey: agentConfig.apiKey || undefined,
               maxSteps: 20,
               compressThreshold: agentConfig.compressThreshold,
+              enableExperienceLoop: agentConfig.enableExperienceLoop,
             }
-          : { mode: 'trace' as const, maxSteps: 20, compressThreshold: agentConfig.compressThreshold };
+          : {
+              mode: 'trace' as const,
+              maxSteps: 20,
+              compressThreshold: agentConfig.compressThreshold,
+              enableExperienceLoop: agentConfig.enableExperienceLoop,
+            };
 
         // 完整管线运行
         // 真实模式：每个子 Agent 阶段完成即回调 onProgress，UI 逐步追加日志并点亮对应 Agent 卡片，
@@ -861,6 +871,8 @@ ${dis || '- （待补充）'}
         // 规范校核结果 + 总工建议（供 3D 违规警示与报告导出使用）
         setLastCodeChecks((result.codeChecks as Record<string, unknown>) || {});
         setLastAdvice(result.advice || null);
+        // 元认知结果（总工反思看板）
+        setMetacognition(result.metacognition);
 
         // 总工主动优化建议分析
         const topScheme = result.schemes.find((s) => s.id === result.recommended.schemeId);
@@ -1521,6 +1533,11 @@ ${dis || '- （待补充）'}
               codeChecks={lastCodeChecks}
             />
         </motion.div>
+        <MetacognitionPanel
+          metacognition={metacognition}
+          confidence={lastAdvice?.confidence ? { level: lastAdvice.confidence.level, score: lastAdvice.confidence.score } : undefined}
+          risks={lastAdvice?.risks}
+        />
         <ChatSection
           messages={chatMessages}
           isLoading={isChatLoading}

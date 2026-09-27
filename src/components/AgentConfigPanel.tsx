@@ -52,8 +52,9 @@ interface AgentConfigPanelProps {
     apiKey: string;
     mode: 'auto' | 'real' | 'demo';
     compressThreshold: number;
+    enableExperienceLoop: boolean;
   };
-  onSave: (config: { apiBase: string; model: string; apiKey: string; mode: 'auto' | 'real' | 'demo'; compressThreshold: number }) => void;
+  onSave: (config: { apiBase: string; model: string; apiKey: string; mode: 'auto' | 'real' | 'demo'; compressThreshold: number; enableExperienceLoop: boolean }) => void;
 }
 
 function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPanelProps) {
@@ -82,6 +83,7 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
         apiKey: localConfig.apiKey || undefined,
         mode: localConfig.mode === 'demo' ? 'trace' : 'real',
         compressThreshold: localConfig.compressThreshold,
+        enableExperienceLoop: localConfig.enableExperienceLoop,
       });
     } catch (e) {
       logger.warn('保存引擎配置失败:', String(e));
@@ -289,6 +291,43 @@ function AgentConfigPanel({ open, onOpenChange, config, onSave }: AgentConfigPan
               单 Agent 轨迹估算 token 超过此值即自动压缩为事实摘要。现场演示可调到
               <span className="text-teal"> 800</span>，观察「[Memory] 检测到上下文过长，已自动压缩」的动态过程。
             </p>
+          </div>
+
+          {/* 经验记忆闭环开关（演示：开启/关闭对比 DAG 拓扑差异） */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">经验记忆闭环（元认知自我进化）</Label>
+            <RadioGroup
+              value={localConfig.enableExperienceLoop ? 'on' : 'off'}
+              onValueChange={(v) =>
+                setLocalConfig({ ...localConfig, enableExperienceLoop: v === 'on' })
+              }
+              className="grid grid-cols-2 gap-2"
+            >
+              <div>
+                <RadioGroupItem value="on" id="exp-on" className="peer sr-only" />
+                <Label
+                  htmlFor="exp-on"
+                  className="flex h-full cursor-pointer flex-col items-start gap-1 rounded-md border border-border/50 bg-background/40 p-3 text-xs transition-all peer-data-[state=checked]:border-teal/50 peer-data-[state=checked]:bg-teal/[0.08] hover:border-border"
+                >
+                  <span className="font-semibold text-foreground">开启（默认）</span>
+                  <span className="text-[10px] text-muted-foreground leading-relaxed">
+                    Chief 反思写入经验库，下次运行真实修改 DAG 拓扑
+                  </span>
+                </Label>
+              </div>
+              <div>
+                <RadioGroupItem value="off" id="exp-off" className="peer sr-only" />
+                <Label
+                  htmlFor="exp-off"
+                  className="flex h-full cursor-pointer flex-col items-start gap-1 rounded-md border border-border/50 bg-background/40 p-3 text-xs transition-all peer-data-[state=checked]:border-amber/50 peer-data-[state=checked]:bg-amber/[0.08] hover:border-border"
+                >
+                  <span className="font-semibold text-foreground">关闭</span>
+                  <span className="text-[10px] text-muted-foreground leading-relaxed">
+                    固定默认 DAG 模板，不读历史经验修改拓扑
+                  </span>
+                </Label>
+              </div>
+            </RadioGroup>
           </div>
 
           {/* 模式说明 */}

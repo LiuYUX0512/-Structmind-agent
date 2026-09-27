@@ -116,6 +116,33 @@ flowchart LR
 
 > 零重依赖：词频向量（1-gram + 2-gram）+ 余弦相似度存 localStorage，`IEmbedder` 接口保留，未来可无缝替换真 embedding RAG。
 
+### 元认知与自我进化（模块③）
+
+Chief 不仅评价**方案**，还评价 **Agent 团队的执行轨迹**——这是本次重构的灵魂。
+
+```mermaid
+flowchart LR
+  CHIEF["Chief 完成方案评审"] --> MET["采集轨迹元数据<br/>循环次数/节点耗时/降级/token"]
+  MET --> REF["反思器生成结构化反思<br/>IStrategyReflection"]
+  REF -->|"real: LlmReflector"| LLM["独立 LLM 请求"]
+  REF -->|"trace: RuleReflector"| RULE["确定性规则检测"]
+  REF --> STORE["reflectionToExperience → storeExperience"]
+  STORE --> EXP[(经验记忆库)]
+  EXP -.下次运行.-> PLAN["Planner 读经验 → 真实修改 DAG 拓扑"]
+  REF --> BOARD["总工反思看板（UI）"]
+
+  style REF fill:#fff7ed
+  style STORE fill:#f0fdf4
+```
+
+**Agent 如何评价自己**：
+
+| 环节 | 机制 | 双模式 |
+|---|---|---|
+| 轨迹评估 | 采集回退循环数、节点耗时、降级标记、token 估算、工具调用数 | 通用 |
+| 结构化反思 | `IStrategyReflection{observation, diagnosis, lesson, applyTo, trigger}` | real: LLM 生成 JSON；trace: 规则检测（循环>0→预校核教训 / 节点>5s→优化 / 降级→查配置） |
+| 闭环激活 | `applyTo=planner` 的教训 → `insert-precheck` 经验 → 下次 Planner 真实插入预校核节点 | 通用 |
+
 ### 设计要点
 
 - **大模型只做"调度员/翻译官"**：意图解析、自然语言问答由 LLM 完成；**所有数值计算（内力估算、配筋率、挠度、碳排系数）由确定性规则引擎执行**，杜绝大模型幻觉导致的"拍脑袋算结构"。
@@ -160,7 +187,7 @@ npm run build:local
 node scripts/build-gh-pages.mjs
 ```
 
-### 回归验证（八套，共 300 项断言）
+### 回归验证（九套，共 312 项断言）
 
 ```bash
 npm run typecheck            # TypeScript 类型检查
@@ -172,6 +199,7 @@ npm run verify:decision      # 决策裁定层（24 项）
 npm run verify:counterfactual # 反事实推演（45 项）
 npm run verify:dag           # DAG 引擎：static/dynamic 逐字段一致（15 项）
 npm run verify:memory        # 记忆系统：压缩/偏好/经验闭环（23 项）
+npm run verify:metacognition # 元认知：轨迹评估/反思/闭环改 DAG（12 项）
 npm run verify:entry         # 真实模式管线（13 项）
 npm run verify:agentic       # 专项：回退闭环/乱序/人类在环等（128 项）
 ```
@@ -190,6 +218,7 @@ src/
 │   ├── dag-engine.ts     # DAG 执行引擎：拓扑调度/条件跳过/递归重规划（模块①）
 │   ├── planner.ts        # Planner：生成 DAG 任务计划（规划/执行分离）
 │   ├── memory.ts         # 主动式记忆系统：短期压缩/长期偏好/经验闭环（模块②）
+│   ├── metacognition.ts  # 元认知：轨迹评估 + 结构化反思 + 闭环改 DAG（模块③）
 │   ├── intent.ts         # 意图理解 Agent：参数解析/补全/模式识别
 │   ├── pipeline.ts       # 管线入口：static（旧四阶段）/ dynamic（DAG）双模式
 │   ├── real-engine.ts    # 真实模式推理引擎：function calling 循环
