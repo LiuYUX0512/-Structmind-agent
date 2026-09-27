@@ -40,3 +40,29 @@ const questions = [
     console.log('');
   }
 })();
+
+// 追加：复述现状场景（当前 30 层，问"改成 30 层"）
+(async () => {
+  const engine = new IntentEngine(structuredClone(ctx));
+  const q = '如果层数改成 30 层会怎样';
+  const r = await engine.processMessage(q);
+  console.log('\n' + '='.repeat(78));
+  console.log(`👤 用户：${q}`);
+  console.log(`🎯 识别意图：${r.intent.intent}`);
+  console.log('='.repeat(78));
+  console.log(r.reply);
+  console.log('');
+})();
+
+// 追加：复述现状场景（当前 30 层，问"改成 30 层"）
+(async () => {
+  const engine = new IntentEngine(structuredClone(ctx));
+  const q = '如果层数改成 30 层会怎样';
+  const r = await engine.processMessage(q);
+  console.log('\n' + '='.repeat(78));
+  console.log(`👤 用户：${q}`);
+  console.log(`🎯 识别意图：${r.intent.intent}`);
+  console.log('='.repeat(78));
+  console.log(r.reply);
+  console.log('');
+})();

@@ -11,10 +11,9 @@ import type { IProjectParams, IWeightConfig } from '@/data/structure';
 import { MOCK_WEIGHT_CONFIG, STRUCTURE_SYSTEM_LIBRARY } from '@/data/structure';
 import { executeToolByName } from './tools';
 import {
-  resolveInterventionFromText,
+  extractIntervention,
   diffParams,
   simulateCounterfactual,
-  describeChange,
   type ICounterfactualReport,
   type ICounterfactualResult,
 } from '@/data/counterfactual';
@@ -52,14 +51,17 @@ function matchWhatIf(msg: string, lowerMsg: string): IIntentResult | null {
     return null;
   }
 
-  // 试解析干预
-  const parsed = resolveInterventionFromText(msg, MOCK_WHATIF_BASELINE);
-  if (!parsed) return null;
+  // 试解析干预 —— 用**纯抽取**（extractIntervention），不依赖任何基线。
+  // 关键：解析层不知道（也不该假设）用户当前参数是多少。
+  // 若在此处用假基线做「是否与当前值相同」判断，会出现误判：
+  //   用户当前恰好等于假基线值时，改动会被当作"没变"而丢弃 → 推演空白。
+  // 是否真的构成变化，由 handleWhatIf 拿真实 context.currentParams 判定。
+  const extracted = extractIntervention(msg);
+  if (!extracted) return null;
 
   const changes: Record<string, string | number> = {};
-  for (const c of diffParams(MOCK_WHATIF_BASELINE, parsed.params)) {
-    const v = parsed.params[c.field];
-    if (v !== undefined) changes[c.field] = v as string | number;
+  for (const [k, v] of Object.entries(extracted.changes)) {
+    if (v !== undefined) changes[k] = v as string | number;
   }
   if (Object.keys(changes).length === 0) return null;
 
@@ -70,27 +72,6 @@ function matchWhatIf(msg: string, lowerMsg: string): IIntentResult | null {
     rawMessage: msg,
   };
 }
-
-/**
- * what-if 解析基线：规则层只是「识别 + 抽取字段」，不需要真实参数值，
- * 但 resolveInterventionFromText 需要一个基线来做合法性判断（如"与当前值不同"）。
- * 这里用一组中性默认值；真正的基线在处理器里由 context.currentParams 提供，
- * 解析结果只取「被改动的字段」而丢弃具体比较结论。
- */
-const MOCK_WHATIF_BASELINE: IProjectParams = {
-  buildingType: 'residential',
-  floors: 30,
-  area: 15000,
-  structurePreference: 'shearwall',
-  seismicIntensity: '8',
-  soilCategory: 'Ⅱ',
-  geologyType: 'clay',
-  mainSpan: 8,
-  budget: 4500,
-  windPressure: '0.45',
-  snowPressure: '0.4',
-  fortificationCategory: '标准设防',
-};
 
 /**
  * 基于关键词 + 数字提取的规则意图解析
@@ -1105,6 +1086,27 @@ export class IntentEngine {
     // 建筑高度联动由推演引擎统一归一化处理（见 counterfactual.ts normalizeHeightLinkage），
     // 这里不再重复干预，避免两套逻辑互相打架。
     const afterParams: IProjectParams = { ...baseline, ...changes };
+
+    // 用**真实基线**判定是否真的构成变化。
+    // 解析层是基线无关的纯抽取（见 extractIntervention），因此必须在此处补这道判断：
+    // 用户可能问「假如改成 20 层」而他当前恰好就是 20 层 —— 那不是推演，是复述现状。
+    const effective = diffParams(baseline, afterParams).filter(
+      (c) => c.field !== 'buildingHeight' // 高度联动是派生结果，不作为"用户意图"
+    );
+    if (effective.length === 0) {
+      const same = changes.floors !== undefined ? `${changes.floors} 层` : '这些参数';
+      return {
+        intent,
+        reply: [
+          `您当前项目的参数已经是${same}，假设条件与现状一致，推演不会产生任何差异。`,
+          '',
+          '如果您想比较其他情形，可以试试：',
+          '- 「如果把层数从 30 降到 20 会怎样」',
+          '- 「剪力墙换成框剪会怎么样」',
+          '- 「假如设防烈度降到 7 度」',
+        ].join('\n'),
+      };
+    }
 
     // 候选体系：优先用上一轮排序结果；没有则用全部已知体系
     const ranking = this.context.lastResult?.ranking ?? [];

@@ -15,9 +15,17 @@
 //   - 差异（delta）：逐指标的变化量 + 方向 + 归因
 //   - 翻转（flip）：规范判定从 pass→fail 或 fail→pass —— 最有信息量的事件
 //
+// 解析层与基线解耦（关键设计）：
+//   extractIntervention(message) 只做「纯抽取」——把句子里的干预读成字段改动，
+//   绝不假设用户当前参数是多少，也不做「是否与当前值相同」的判断。
+//   是否真构成变化，由调用方拿真实基线判定（见 intent.ts 的 handleWhatIf）。
+//   原因：若解析层自带假基线，用户当前值恰好等于假基线值时，改动会被误当「没变」丢弃。
+//
 // EXPORTS: ICounterfactualChange, ICounterfactualMetricDelta, ICounterfactualCheckFlip,
-//          ICounterfactualResult, simulateCounterfactual, resolveInterventionFromText,
-//          applyParamChanges, describeChange
+//          ICounterfactualResult, ICounterfactualReport,
+//          extractIntervention, resolveInterventionFromText, diffParams,
+//          applyParamChanges (结构化干预，供 UI 滑杆),
+//          simulateCounterfactual, simulateSystemCounterfactual
 
 import { evaluateScheme, type ISchemeEvaluation } from './scheme-evaluator';
 import { STRUCTURE_SYSTEM_LIBRARY, type IProjectParams, type INormCheckItem } from './structure';
@@ -601,35 +609,27 @@ export function diffParams(before: IProjectParams, after: IProjectParams): ICoun
   return out;
 }
 
-/** 生成「把 X 从 A 改成 B」的中文描述，用于归因文案 */
-export function describeChange(before: IProjectParams, after: IProjectParams): string {
-  const changes = diffParams(before, after).filter((c) => c.field !== 'buildingHeight');
-  if (changes.length === 0) return '本次调整';
-  return changes.map((c) => `${c.label}由 ${c.from} 改为 ${c.to}`).join('、');
-}
-
 // ============ 自然语言 → 参数干预 ============
 
 /**
- * 从自然语言里解析反事实干预。
- * 返回 null 表示没能识别出任何具体改动（调用方应转为澄清问句，不瞎猜）。
+ * 从自然语言中**纯抽取**参数值，不与任何基线比较。
  *
- * 支持的模式（中文口语）：
- *   - 层数：「层数从 30 降到 20」「降到 20 层」「改成 18 层」
- *   - 体系：「剪力墙换成框剪」「改用框架结构」「换成钢结构」
- *   - 烈度：「烈度从 8 度降到 7 度」
- *   - 场地：「场地从 Ⅱ 类改成 Ⅲ 类」
- *   - 跨度：「跨度改成 9 米」
- *   - 预算：「预算降到 4000」
- *   - 高度：「高度限制到 80 米」
+ * 为什么必须与基线解耦：
+ *   「假设层数改成 30 层」这句话是否正确解析，**取决于用户当前是不是 30 层**。
+ *   若解析时用一组假基线做 `to !== baseline.floors` 判断，
+ *   会出现两类误判：
+ *     (a) 用户当前恰好等于假基线值 → 被当作"没改动"而丢弃 → 推演为空白
+ *     (b) 用户当前与假基线不同 → 抽取值正确但判断依据是错的
+ *   因此本函数只负责「句子里说了要改成什么」，是否真的构成变化由调用方
+ *   拿**真实基线**去 `diffParams` 判定。
+ *
+ * @returns 抽取到的字段值（可能为空对象）+ 解析说明；无可识别内容时返回 null
  */
-export function resolveInterventionFromText(
-  message: string,
-  baseline: IProjectParams
-): { params: IProjectParams; notes: string[] } | null {
+export function extractIntervention(
+  message: string
+): { changes: Partial<IProjectParams>; notes: string[] } | null {
   const notes: string[] = [];
-  const next: IProjectParams = { ...baseline };
-  let touched = false;
+  const changes: Partial<IProjectParams> = {};
   /** 用户是否显式指定了建筑高度（显式时层数不再联动高度） */
   let heightTouched = false;
 
@@ -647,15 +647,13 @@ export function resolveInterventionFromText(
     const fromN = parseInt(floorPair[1], 10);
     const to = parseInt(floorPair[2], 10);
     if (to > 0 && to <= 120 && to !== fromN) {
-      next.floors = to;
+      changes.floors = to;
       notes.push(`按「${fromN} 层 → ${to} 层」解读`);
-      touched = true;
     }
   } else if (floorSimple) {
     const to = parseInt(floorSimple[1], 10);
-    if (to > 0 && to <= 120 && to !== baseline.floors) {
-      next.floors = to;
-      touched = true;
+    if (to > 0 && to <= 120) {
+      changes.floors = to;
     }
   }
 
@@ -671,14 +669,10 @@ export function resolveInterventionFromText(
   const sysTarget = sysSwap ? sysSwap[2] : sysSimple?.[1];
   if (sysTarget) {
     const resolved = mapSystemToken(sysTarget);
-    if (resolved && resolved !== baseline.structurePreference) {
-      next.structurePreference = resolved;
+    if (resolved) {
+      changes.structurePreference = resolved;
       const name = STRUCTURE_SYSTEM_LIBRARY.find((s) => s.id === resolved)?.name ?? resolved;
-      const fromName =
-        STRUCTURE_SYSTEM_LIBRARY.find((s) => s.id === baseline.structurePreference)?.name ??
-        baseline.structurePreference;
-      notes.push(`识别到体系变更：${fromName} → 「${name}」`);
-      touched = true;
+      notes.push(`识别到体系：改为「${name}」`);
     }
   }
 
@@ -686,40 +680,28 @@ export function resolveInterventionFromText(
   const intensityMatch = message.match(/(?:烈度|设防|抗震)[\s\S]{0,8}?(\d+)\s*度/);
   if (intensityMatch) {
     const to = intensityMatch[1];
-    if (to !== baseline.seismicIntensity && ['6', '7', '8', '9'].includes(to)) {
-      next.seismicIntensity = to;
-      touched = true;
-    }
+    if (['6', '7', '8', '9'].includes(to)) changes.seismicIntensity = to;
   }
 
   // ---- 场地类别 ----
   const soilMatch = message.match(/(?:场地|土)[\s\S]{0,6}?(Ⅰ|Ⅱ|Ⅲ|Ⅳ|I{1,3}V?|IV)\s*类/);
   if (soilMatch) {
     const norm = normalizeSoil(soilMatch[1]);
-    if (norm && norm !== baseline.soilCategory) {
-      next.soilCategory = norm;
-      touched = true;
-    }
+    if (norm) changes.soilCategory = norm;
   }
 
   // ---- 跨度 ----
   const spanMatch = message.match(/跨度[\s\S]{0,8}?(\d+)/) || message.match(/(\d+)\s*米跨/);
   if (spanMatch) {
     const to = parseInt(spanMatch[1], 10);
-    if (to > 0 && to <= 30 && to !== baseline.mainSpan) {
-      next.mainSpan = to;
-      touched = true;
-    }
+    if (to > 0 && to <= 30) changes.mainSpan = to;
   }
 
   // ---- 预算 ----
   const budgetMatch = message.match(/预算[\s\S]{0,10}?(\d{3,6})/);
   if (budgetMatch) {
     const to = parseInt(budgetMatch[1], 10);
-    if (to > 0 && to !== baseline.budget) {
-      next.budget = to;
-      touched = true;
-    }
+    if (to > 0) changes.budget = to;
   }
 
   // ---- 建筑高度 ----
@@ -727,24 +709,61 @@ export function resolveInterventionFromText(
   if (heightMatch) {
     const to = parseInt(heightMatch[1], 10);
     if (to > 0 && to <= 500) {
-      next.buildingHeight = to;
-      touched = true;
+      changes.buildingHeight = to;
       heightTouched = true;
       notes.push('已锁定建筑高度（不再按层数×3m 自动估算）');
     }
   }
 
-  if (!touched) return null;
+  if (Object.keys(changes).length === 0) return null;
 
-  // 层数联动建筑高度。
-  // 语义依据：用户说「层数从 30 降到 20」，工程含义就是「建筑高度随之下降」。
-  // 若不同步高度，最大适用高度、层间位移角、周期比等判定会仍在旧高度下计算，
-  // 推演结果失真（降层却看不出任何规范判定改善）。
-  // 仅当用户本次**显式指定了建筑高度**（heightTouched）才不联动。
-  if (next.floors !== baseline.floors && !heightTouched) {
-    delete next.buildingHeight;
-    notes.push('建筑高度已随层数联动重算（按层高 3m 估算）');
+  // 层数变化且未显式指定高度 → 标记高度需联动（由调用方决定如何落地）
+  if (changes.floors !== undefined && !heightTouched) {
+    notes.push('建筑高度将随层数联动重算（按层高 3m 估算）');
   }
+
+  return { changes, notes };
+}
+
+/**
+ * 从自然语言里解析反事实干预，并套用到给定基线上。
+ * 返回 null 表示没能识别出任何具体改动（调用方应转为澄清问句，不瞎猜）。
+ *
+ * 注意：本函数会把抽取结果与 baseline 合并，并在合并后检测"是否真的构成变化"。
+ * 若只想要抽取结果（避免基线耦合），用 extractIntervention。
+ *
+ * 支持的模式（中文口语）：
+ *   - 层数：「层数从 30 降到 20」「降到 20 层」「改成 18 层」
+ *   - 体系：「剪力墙换成框剪」「改用框架结构」「换成钢结构」
+ *   - 烈度：「烈度从 8 度降到 7 度」
+ *   - 场地：「场地从 Ⅱ 类改成 Ⅲ 类」
+ *   - 跨度：「跨度改成 9 米」
+ *   - 预算：「预算降到 4000」
+ *   - 高度：「高度限制到 80 米」
+ */
+export function resolveInterventionFromText(
+  message: string,
+  baseline: IProjectParams
+): { params: IProjectParams; notes: string[] } | null {
+  const extracted = extractIntervention(message);
+  if (!extracted) return null;
+
+  const next: IProjectParams = { ...baseline, ...extracted.changes };
+  const notes = [...extracted.notes];
+
+  // 层数联动建筑高度：**仅当层数确实发生变化**时才联动。
+  // 若句中的层数恰好等于当前层数（如"改成 30 层"而当前就是 30 层），
+  // 它不构成层数变化，也就不该触发高度联动——
+  // 否则会把 buildingHeight 从 90m 清成"自动估算"，
+  // 使 diffParams 误认为发生了变化，把一个"复述现状"的问题渲染成推演。
+  const floorsChanged =
+    extracted.changes.floors !== undefined && extracted.changes.floors !== baseline.floors;
+  if (floorsChanged && extracted.changes.buildingHeight === undefined) {
+    delete next.buildingHeight;
+  }
+
+  // 合并后若与基线完全一致，说明这句话描述的正是现状，不构成干预
+  if (diffParams(baseline, next).length === 0) return null;
 
   return { params: next, notes };
 }

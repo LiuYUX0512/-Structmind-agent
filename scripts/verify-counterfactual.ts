@@ -15,8 +15,8 @@ import {
   simulateCounterfactual,
   simulateSystemCounterfactual,
   resolveInterventionFromText,
+  extractIntervention,
   diffParams,
-  describeChange,
   applyParamChanges,
 } from '../src/data/counterfactual';
 import { parseIntentByRules } from '../src/agent/intent';
@@ -115,6 +115,47 @@ function withFloors(floors: number): IProjectParams {
     !!r5 && r5.params.soilCategory === 'Ⅲ',
     `soilCategory=${r5?.params.soilCategory}`
   );
+
+  // ---- B6~B9：解析层必须与基线解耦 ----
+  // 语义依据：解析层不知道用户当前参数，也不该假设。
+  // 若用假基线做「是否与当前值相同」判断，会出现：
+  //   用户当前恰好等于假基线值时，改动被当作"没变"而丢弃 → 推演空白。
+
+  // B6：extractIntervention 对同一句话，在任何基线下抽取结果必须一致
+  const e30 = extractIntervention('假如层数改成 18 层呢');
+  const e12 = extractIntervention('假如层数改成 18 层呢');
+  push(
+    'B6 extractIntervention 基线无关（同一输入恒同输出）',
+    e30?.changes.floors === 18 && e12?.changes.floors === 18,
+    `floors=${e30?.changes.floors} / ${e12?.changes.floors}`
+  );
+
+  // B7：关键反例 —— 用户当前恰好等于「假定值」时，抽取仍须成功。
+  // 这正是旧实现（用 MOCK_WHATIF_BASELINE.floors=30 做比较）会误判的场景。
+  const at30 = { ...BASE, floors: 30 };
+  const eAt30 = extractIntervention('如果层数改成 30 层会怎样');
+  push(
+    'B7 当前值等于目标值时仍能抽取出干预（旧假基线方案的致命误判）',
+    eAt30?.changes.floors === 30,
+    `extract=${JSON.stringify(eAt30?.changes ?? null)}`
+  );
+
+  // B8：resolveInterventionFromText 在「与真实基线一致」时应返回 null
+  //     —— 这是正确行为：描述现状不构成干预
+  const sameBaseline = resolveInterventionFromText('如果层数改成 30 层会怎样', at30);
+  push(
+    'B8 假设与真实基线一致时返回 null（描述现状不是干预）',
+    sameBaseline === null,
+    `实际=${JSON.stringify(sameBaseline)}`
+  );
+
+  // B9：换个真实基线，同一句话应产生干预（证明判断依据是真实基线而非常量）
+  const otherBaseline = resolveInterventionFromText('如果层数改成 30 层会怎样', { ...BASE, floors: 20 });
+  push(
+    'B9 换真实基线后同一句话构成干预（判断依据是真实基线）',
+    !!otherBaseline && otherBaseline.params.floors === 30,
+    `floors=${otherBaseline?.params.floors}`
+  );
 }
 
 // ============================================================
@@ -130,9 +171,12 @@ function withFloors(floors: number): IProjectParams {
   );
 
   push(
-    'C2 describeChange 生成可读描述',
-    describeChange(BASE, after).includes('层数由 30层 改为 20层'),
-    describeChange(BASE, after)
+    'C2 diffParams 生成可读的双向描述',
+    (() => {
+      const c = diffParams(BASE, after)[0];
+      return c.from === '30层' && c.to === '20层' && c.label === '层数';
+    })(),
+    JSON.stringify(diffParams(BASE, after))
   );
 
   const r = simulateSystemCounterfactual('shearwall', BASE, after, true);
