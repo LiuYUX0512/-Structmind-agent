@@ -53,7 +53,19 @@
    ```
    仅当这条仍报用户名/密码错误时，才需要把账号加为仓库协作者或提供带 repo 权限的 token。
 3. **不要把 API Key、内部配置、占位符漏进公开产物**；交付前核对是否泄漏。
-4. 验收标准：可正常复现运行的 Demo + 完整参赛材料 + 所有改动已同步回仓库。
+4. **同步线上 Demo（关键，勿漏）**：改完源码并 push 到 `main` 后，必须重建并更新 `gh-pages` 分支，否则线上网页看不到你的改动。在本仓库目录执行：
+   ```
+   node scripts/build-gh-pages.mjs
+   cd dist/gh-pages
+   git init -q
+   git config user.name "LiuYUX0512"
+   git config user.email "5399301912@163.com"
+   git add -A
+   git commit -m "deploy: sync main"
+   git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push --force https://github.com/LiuYUX0512/-Structmind-agent.git HEAD:gh-pages
+   ```
+   说明：线上 Demo 部署自 `gh-pages` 分支（构建产物），与 `main`（源码）分离，必须手动重建同步。仓库已配置 `.github/workflows/deploy.yml` 云端自动部署通道，但不保证每次成功，**以手动同步为最终保障**。
+5. 验收标准：可正常复现运行的 Demo + 完整参赛材料 + 所有改动已同步回仓库。
 
 ---
 
