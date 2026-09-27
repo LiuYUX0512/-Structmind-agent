@@ -37,6 +37,12 @@ export {
   type IMemoryTriggerContext,
   type IMemoryEvent,
 } from './memory';
+export {
+  RuleReflector,
+  LlmReflector,
+  reflectionToExperience,
+  type IReflector,
+} from './metacognition';
 export { IntentEngine, processAgentMessage, parseIntentByRules } from './intent';
 export type { IConversationContext } from './intent';
 export { RealEngine, saveEngineConfig, loadEngineConfig, isRealModeAvailable } from './real-engine';

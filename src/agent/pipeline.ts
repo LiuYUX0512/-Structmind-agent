@@ -10,9 +10,16 @@ import { executeToolByName } from './tools';
 import { DagScheduler, type ITaskNode, type IReplanInstruction } from './dag-engine';
 import { Planner, type IPlanNodeSpec } from './planner';
 import {
+  RuleReflector,
+  LlmReflector,
+  reflectionToExperience,
+  type IReflector,
+} from './metacognition';
+import {
   MemorySystem,
   RuleCompressor,
   LlmCompressor,
+  estimateTokens,
   type ICompressor,
   type IMemoryEvent,
   type IMemoryTriggerContext,
@@ -166,6 +173,14 @@ export class AgentPipeline {
   /** 偏好提示文本（注入 Architect 选型 prompt） */
   private preferenceHint = '';
 
+  // ===== 元认知（模块③）=====
+  /** 反思器：real 用 LLM（独立请求），trace 用规则 */
+  private reflector: IReflector;
+  /** 各 Agent 节点累计耗时（ms），供轨迹评估 */
+  private trajectoryNodeDurations: Record<string, number> = {};
+  /** DAG 重规划次数（dynamic 模式由调度器回调累加） */
+  private trajectoryReplanCount = 0;
+
   constructor(
     params: IProjectParams,
     weights?: IWeightConfig,
@@ -185,6 +200,10 @@ export class AgentPipeline {
       this.config.mode === 'real'
         ? new LlmCompressor((text, instruction) => this.engine.summarize(text, instruction))
         : new RuleCompressor();
+    this.reflector =
+      this.config.mode === 'real'
+        ? new LlmReflector((text, instruction) => this.engine.summarize(text, instruction))
+        : new RuleReflector();
   }
 
   /** 阶段进度回调（供 UI 逐步展示真实模式的思考过程） */
@@ -249,14 +268,74 @@ export class AgentPipeline {
   /**
    * 读取命中当前上下文的经验（供 Planner 修改 DAG 拓扑，模块③闭环激活）。
    * trigger 纯函数由 memory.recallExperiences 内部调用。
+   * 受 enableExperienceLoop 开关控制（默认开启，配置面板可关）。
    */
   private recallExperiences(): IExperience[] {
+    if (this.config.enableExperienceLoop === false) return [];
     const ctx: IMemoryTriggerContext = {
       params: this.params,
       realMode: this.config.mode === 'real',
       allowRecheck: this.config.allowRecheck !== false,
     };
     return this.memory.recallExperiences(ctx).experiences;
+  }
+
+  /** 记录某 Agent 节点耗时（累积，供轨迹评估） */
+  private recordDuration(agent: AgentType, ms: number): void {
+    this.trajectoryNodeDurations[agent] = (this.trajectoryNodeDurations[agent] ?? 0) + ms;
+  }
+
+  /**
+   * 元认知（模块③灵魂）：采集轨迹指标 → 反思器生成结构化反思 →
+   * 写入 finalResult.metacognition + 通过 storeExperience 写入经验库（闭环激活）。
+   */
+  private async reflectAndStore(): Promise<void> {
+    if (!this.finalResult) return;
+
+    // 采集轨迹指标
+    const metrics = {
+      totalLoops: this.correctionMeta?.loops ?? this.trajectoryReplanCount,
+      nodeDurations: { ...this.trajectoryNodeDurations },
+      degraded: !!this.finalResult.degraded,
+      tokenEstimate: this.estimateTrajectoryTokens(),
+      toolCallCount: this.actionLog.filter((l) => l.type === 'tool_call').length,
+      replanCount: this.trajectoryReplanCount,
+    };
+
+    // 反思（real 用 LLM，trace 用规则；失败降级不阻断）
+    const reflection = await this.reflector.reflect(metrics);
+    this.finalResult.metacognition = { metrics, reflection };
+
+    // 可见化：写入 [Metacognition] 日志
+    this.pushMemoryLog({
+      kind: 'experience-store',
+      message: `[Metacognition] 执行轨迹反思：${reflection.observation} → ${reflection.lesson}`,
+    });
+
+    // 闭环激活：反思转成经验写入经验库，下次 Planner 真实修改 DAG
+    if (reflection.applyTo === 'planner') {
+      const exp = reflectionToExperience(reflection, {
+        params: this.params,
+        realMode: this.config.mode === 'real',
+        allowRecheck: this.config.allowRecheck !== false,
+      });
+      if (exp) {
+        this.memory.storeExperience(exp);
+        this.pushMemoryLog({
+          kind: 'experience-store',
+          message: `[Metacognition] 教训已写入经验库，下次运行将自动修改 DAG 拓扑`,
+        });
+      }
+    }
+
+    // 同步到最终结果
+    this.finalResult.actionLog = [...this.actionLog];
+  }
+
+  /** 估算全量 actionLog 的 token 数（复用 memory 的 estimateTokens） */
+  private estimateTrajectoryTokens(): number {
+    const text = this.actionLog.map((l) => l.content ?? '').join('\n');
+    return estimateTokens(text);
   }
 
   /**
@@ -340,6 +419,8 @@ export class AgentPipeline {
       const result = await this.execute();
       // 主动写入：运行结束后自动提炼偏好存库（下次运行可注入）
       this.distillPreference();
+      // 元认知：采集轨迹 → 结构化反思 → 写入经验库（闭环激活）
+      await this.reflectAndStore();
       return result;
     } catch (e) {
       // 保命机制：真实模式崩溃时自动降级到演示轨迹模式继续跑完（透明降级，不静默）
@@ -351,6 +432,7 @@ export class AgentPipeline {
         const result = await this.execute();
         this.finalResult = { ...result, degraded: { from: 'real', reason } };
         this.distillPreference();
+        await this.reflectAndStore();
         return this.finalResult;
       }
       throw e;
@@ -394,7 +476,8 @@ export class AgentPipeline {
     const scheduler = new DagScheduler<this>({ maxReplans: 8 });
     const nodes = plan.map((spec) => this.bindNode(spec));
 
-    await scheduler.run(nodes, this);
+    const runResult = await scheduler.run(nodes, this);
+    this.trajectoryReplanCount = runResult.replanCount;
 
     if (!this.finalResult) {
       throw new Error('管线运行异常，未生成最终结果');
@@ -688,6 +771,7 @@ export class AgentPipeline {
 
   /** 第一步：方案创作工程师（feedback 非空 = 校核回退闭环打回重出） */
   private async runArchitect(feedback?: string): Promise<void> {
+    const _t0 = Date.now();
     const useReal = this.config.mode === 'real';
 
     if (useReal) {
@@ -760,10 +844,12 @@ export class AgentPipeline {
 
     // 短期记忆：阶段边界压缩（超阈值时提炼事实摘要，注入下一 Agent）
     await this.compressStage();
+    this.recordDuration('architect', Date.now() - _t0);
   }
 
   /** 第二步：规范校核工程师 */
   private async runCode(): Promise<void> {
+    const _t0 = Date.now();
     const schemeIds = this.candidateSchemes.map((s) => s.id);
     const useReal = this.config.mode === 'real';
 
@@ -858,10 +944,12 @@ export class AgentPipeline {
 
     // 短期记忆：阶段边界压缩
     await this.compressStage();
+    this.recordDuration('code', Date.now() - _t0);
   }
 
   /** 第三步：经济评估工程师 */
   private async runEconomist(): Promise<void> {
+    const _t0 = Date.now();
     const schemeIds = this.candidateSchemes.map((s) => s.id);
     const useReal = this.config.mode === 'real';
 
@@ -925,10 +1013,12 @@ export class AgentPipeline {
 
     // 短期记忆：阶段边界压缩
     await this.compressStage();
+    this.recordDuration('economist', Date.now() - _t0);
   }
 
   /** 第四步：总工评审 */
   private async runChief(): Promise<void> {
+    const _t0 = Date.now();
     const schemeIds = this.candidateSchemes.map((s) => s.id);
     const useReal = this.config.mode === 'real';
 
@@ -1072,6 +1162,8 @@ export class AgentPipeline {
         budgetExceeded: [...this.budgetExceededIds],
       };
     }
+
+    this.recordDuration('chief', Date.now() - _t0);
   }
 
   /**

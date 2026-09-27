@@ -251,6 +251,14 @@ export interface IAgentPipelineResult {
   humanOverrides?: IHumanOverrides;
   /** 超出人工预算上限的方案 ID 列表（budgetCap 设定时计算） */
   budgetExceeded?: string[];
+  /**
+   * 元认知结果（模块③，可选字段）：Chief 评价 Agent 执行轨迹的产物。
+   * 包含轨迹指标 + 结构化反思，供「总工反思看板」展示。
+   */
+  metacognition?: {
+    metrics: ITrajectoryMetrics;
+    reflection: IStrategyReflection;
+  };
 }
 
 /** 人类在环（HITL）干预项：工程师在管线运行前/中设定的硬约束与备注 */
@@ -263,6 +271,36 @@ export interface IHumanOverrides {
   forcedWeights?: Partial<IWeightConfig>;
   /** 人工备注：注入到子 Agent 的 prompt 中 */
   notes?: string;
+}
+
+/** 结构化策略反思（元认知模块③）：Chief 评价 Agent 执行轨迹的机器可读产物 */
+export interface IStrategyReflection {
+  /** 观察到的事实（发生了什么） */
+  observation: string;
+  /** 归因（为什么会这样） */
+  diagnosis: string;
+  /** 教训（下次该怎么做） */
+  lesson: string;
+  /** 教训作用于哪一层 */
+  applyTo: 'planner' | 'tool' | 'prompt';
+  /** 什么情况下复用这条教训（用于转成经验触发条件） */
+  trigger: string;
+}
+
+/** 本次运行的轨迹元数据（元认知反思的输入） */
+export interface ITrajectoryMetrics {
+  /** 回退循环次数（correctionMeta.loops 或 DAG replanCount） */
+  totalLoops: number;
+  /** 各 Agent 节点耗时（ms） */
+  nodeDurations: Record<string, number>;
+  /** 是否触发真实模式崩溃降级 */
+  degraded: boolean;
+  /** token 消耗估算（全量 actionLog） */
+  tokenEstimate: number;
+  /** 工具调用次数 */
+  toolCallCount: number;
+  /** 重规划次数 */
+  replanCount: number;
 }
 
 /** 推理引擎配置 */
@@ -293,6 +331,11 @@ export interface IEngineConfig {
    * UI 配置面板可调（如调到 800 现场演示「上下文过长自动压缩」）。
    */
   compressThreshold?: number;
+  /**
+   * 经验记忆闭环开关（默认开启）。关闭后 Planner 不再读历史经验修改 DAG 拓扑。
+   * UI 配置面板显式暴露（演示时可现场对比开启/关闭的拓扑差异）。
+   */
+  enableExperienceLoop?: boolean;
 }
 
 /** 对话意图类型 */
