@@ -21,9 +21,11 @@ interface HeroSectionProps {
   metrics?: ITrajectoryMetrics;
   /** 播放 DAG 电影模式 */
   onPlayMovie?: () => void;
+  /** 是否展示示例项目（首次加载、未运行真实结果时） */
+  isDemoCase?: boolean;
 }
 
-function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPlayMovie }: HeroSectionProps) {
+function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPlayMovie, isDemoCase }: HeroSectionProps) {
   const features = [
     { icon: PenTool, label: '方案创作', desc: '多体系智能生成', accent: 'primary' },
     { icon: Scale, label: '规范校核', desc: 'GB 55002 · 50011', accent: 'teal' },
@@ -401,6 +403,11 @@ function HeroSection({ onStart, params, scheme, codeChecks, logs, metrics, onPla
                 transition={{ delay: 0.8, duration: 0.6 }}
                 className="mt-4"
               >
+                {isDemoCase && (
+                  <div className="mb-2 flex items-center gap-1.5 rounded-md border border-teal/30 bg-teal/10 px-2.5 py-1.5 text-[11px] text-teal">
+                    📌 当前展示：示例项目（输入参数开始自定义）
+                  </div>
+                )}
                 <CapabilityRadar logs={logs ?? []} metrics={metrics} />
               </motion.div>
 

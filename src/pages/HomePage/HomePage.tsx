@@ -22,6 +22,7 @@ import ComparisonSection from './sections/ComparisonSection';
 import MetacognitionPanel from '@/components/MetacognitionPanel';
 import MemoryPanel from '@/components/MemoryPanel';
 import DagMovieMode from '@/components/DagMovieMode';
+import { HIGHLIGHT_CASE_LOG, HIGHLIGHT_CASE_METRICS } from '@/data/highlight-case';
 import { DebatePanel } from '@/components/DebatePanel';
 import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
@@ -1452,9 +1453,10 @@ ${dis || '- （待补充）'}
           params={projectParams}
           scheme={schemes.find((s) => s.id === selectedSchemeId) || (recommendation ? schemes[0] : null)}
           codeChecks={lastCodeChecks}
-          logs={actionLog}
-          metrics={metacognition?.metrics}
+          logs={actionLog.length > 0 ? actionLog : HIGHLIGHT_CASE_LOG}
+          metrics={actionLog.length > 0 ? metacognition?.metrics : HIGHLIGHT_CASE_METRICS}
           onPlayMovie={() => setMovieMode(true)}
+          isDemoCase={actionLog.length === 0}
         />
          <ParamsSection
            onGenerate={handleGenerate}
@@ -1904,7 +1906,7 @@ ${dis || '- （待补充）'}
        </div>
 
        {/* DAG 电影模式（15 秒全屏演示） */}
-       <DagMovieMode open={movieMode} onClose={() => setMovieMode(false)} />
+       <DagMovieMode open={movieMode} onClose={() => setMovieMode(false)} logs={actionLog} />
      </>
    );
  }

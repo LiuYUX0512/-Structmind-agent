@@ -3,13 +3,16 @@
 // 评审要点：同步字幕 + 顶部进度条 + 章节指示 + 跳过按钮 + 键盘导航 + 焦点环
 // EXPORTS: DagMovieMode
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, SkipForward } from 'lucide-react';
+import type { IAgentActionLog } from '@/agent/types';
 
 interface DagMovieModeProps {
   open: boolean;
   onClose: () => void;
+  /** 本次运行的 actionLog（非空 = 真实回放模式；空 = 高光演示模式） */
+  logs?: IAgentActionLog[];
 }
 
 interface IScene {
@@ -21,12 +24,45 @@ interface IScene {
 }
 
 const TOTAL = 15;
-const SCENES: IScene[] = [
+
+/** 高光演示：固定 4 镜头（首次体验的教学片） */
+const DEMO_SCENES: IScene[] = [
   { index: 1, from: 0, to: 3, title: '协同开始', caption: '四个 Agent 开始协同，方案创作到总工评审流水接力' },
   { index: 2, from: 3, to: 7, title: '规范回退', caption: '规范校核发现违规，红色弧线打回 Architect 重新选型' },
   { index: 3, from: 7, to: 11, title: '记忆注入', caption: '命中历史教训，自动插入抗震预校核节点' },
   { index: 4, from: 11, to: 15, title: '元认知反思', caption: '总工反思执行轨迹，把教训写回经验库' },
 ];
+
+/** 真实回放：从本次 actionLog 提取镜头（没触发的环节不出现，演示=真实） */
+function buildReplayScenes(logs: IAgentActionLog[]): IScene[] {
+  const hasRework = logs.some(
+    (l) => l.content && (/\[预校核\]|打回|回退|重选|重新选型/.test(l.content) || (l.type === 'tool_result' && /failCount/.test(JSON.stringify(l.result ?? ''))))
+  );
+  const hasMemory = logs.some((l) => l.content?.includes('[Memory]'));
+  const hasMeta = logs.some((l) => l.content?.includes('[Metacognition]'));
+
+  const scenes: IScene[] = [
+    { index: 1, from: 0, to: 3, title: '协同开始', caption: '四个 Agent 开始协同，方案创作到总工评审流水接力' },
+  ];
+  let t = 3;
+  let idx = 1;
+  if (hasRework) {
+    idx += 1;
+    scenes.push({ index: idx, from: t, to: t + 4, title: '规范回退', caption: '规范校核发现违规，红色弧线打回 Architect 重新选型' });
+    t += 4;
+  }
+  if (hasMemory) {
+    idx += 1;
+    scenes.push({ index: idx, from: t, to: t + 4, title: '记忆注入', caption: '命中历史教训，自动插入抗震预校核节点' });
+    t += 4;
+  }
+  if (hasMeta) {
+    idx += 1;
+    scenes.push({ index: idx, from: t, to: t + 4, title: '元认知反思', caption: '总工反思执行轨迹，把教训写回经验库' });
+    t += 4;
+  }
+  return scenes;
+}
 
 const AGENTS = [
   { key: 'architect', label: '方案创作', x: 100, color: '#12A5B5' },
@@ -127,10 +163,14 @@ function MovieScene({ scene }: { scene: number }) {
   );
 }
 
-function DagMovieMode({ open, onClose }: DagMovieModeProps) {
+function DagMovieMode({ open, onClose, logs }: DagMovieModeProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(true);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 真实回放 vs 高光演示
+  const isReplay = !!logs && logs.length > 0;
+  const scenes = useMemo(() => (isReplay ? buildReplayScenes(logs!) : DEMO_SCENES), [isReplay, logs]);
 
   // 启动 / 重置
   useEffect(() => {
@@ -185,7 +225,7 @@ function DagMovieMode({ open, onClose }: DagMovieModeProps) {
 
   if (!open) return null;
 
-  const scene = SCENES.find((s) => currentTime >= s.from && currentTime < s.to) ?? SCENES[SCENES.length - 1];
+  const scene = scenes.find((s) => currentTime >= s.from && currentTime < s.to) ?? scenes[scenes.length - 1];
   const progress = Math.min(100, (currentTime / TOTAL) * 100);
 
   return (
@@ -200,10 +240,10 @@ function DagMovieMode({ open, onClose }: DagMovieModeProps) {
         />
       </div>
 
-      {/* 顶部：章节指示 + 播放/跳过 */}
+      {/* 顶部：章节指示 + 模式标注 + 播放/跳过 */}
       <div className="flex items-center justify-between px-8 py-4">
         <span className="text-caption font-mono text-muted-foreground">
-          {scene.index}/4 · {scene.title}
+          {isReplay ? '📽️ 真实回放' : '🎬 高光演示'} · {scene.index}/{scenes.length} · {scene.title}
         </span>
         <div className="flex items-center gap-element">
           <button

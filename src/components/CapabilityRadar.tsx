@@ -47,9 +47,11 @@ export function computeCapabilityScores(
   const metaCount = logList.filter((l) => l.content?.includes('[Metacognition]')).length;
   const metacognition = Math.min(100, Math.round((metaCount / 5) * 100));
 
-  // 零幻觉：所有计算均来自硬编码工具（恒 100%）
+  // 硬计算密度：工具调用次数 / 总日志条目（越高越依赖确定性规则引擎，而非 LLM 自由发挥）
+  // 这是有波动的动态指标，而非恒 100% 的花瓶维度
   const toolCalls = logList.filter((l) => l.type === 'tool_call').length;
-  const zeroHallucination = toolCalls > 0 ? 100 : 0;
+  const total = logList.length;
+  const hardCompute = total === 0 ? 0 : Math.round((toolCalls / total) * 100);
 
   // 多Agent协同：实际激活的 Agent 数 / 4
   const activeAgents = new Set(logList.filter((l) => l.agent).map((l) => l.agent)).size;
@@ -87,12 +89,12 @@ export function computeCapabilityScores(
       source: `本次生成 ${metaCount} 条结构化反思`,
     },
     {
-      key: 'zero-hallucination',
-      label: '零幻觉计算',
-      score: zeroHallucination,
+      key: 'hard-compute',
+      label: '硬计算密度',
+      score: hardCompute,
       numerator: `${toolCalls}`,
-      denominator: `${toolCalls}`,
-      source: `${toolCalls} 次数值计算全部由规则引擎完成（零 LLM 计算）`,
+      denominator: `${total}`,
+      source: `${toolCalls}/${total} 条日志为工具调用，越高越依赖确定性规则引擎（零幻觉）`,
     },
     {
       key: 'collaboration',
