@@ -121,6 +121,42 @@ const push = (name: string, ok: boolean, detail = '') => checks.push([name, ok, 
   push('A6 失败即抛：节点异常向上传播', threw, '');
 }
 
+// A7：依赖重定向 —— 重规划后下游节点 deps 指向最新节点（不读废弃结果）
+{
+  let observedDeps: string[] = [];
+  let readValue = '';
+  let shared = '';
+  const nodes: ITaskNode<null>[] = [
+    {
+      id: 'a', label: 'A', deps: [],
+      run: async () => { shared = 'A-首轮(废弃)'; },
+    },
+    {
+      id: 'b', label: 'B', deps: ['a'],
+      run: async (): Promise<unknown | IReplanInstruction<null>> => ({
+        __replan: true,
+        insertBefore: 'c',
+        reason: 'b 触发重规划',
+        redirects: [{ from: 'a', to: 'a-r1' }, { from: 'b', to: 'b-r1' }],
+        nodes: [
+          { id: 'a-r1', label: 'A重出', deps: ['b'], run: async () => { shared = 'A-重出(最新)'; } },
+          { id: 'b-r1', label: 'B复核', deps: ['a-r1'], run: async () => { } },
+        ],
+      }),
+    },
+  ];
+  const cNode: ITaskNode<null> = {
+    id: 'c', label: 'C', deps: ['a', 'b'],
+    run: async () => { observedDeps = [...(cNode.deps ?? [])]; readValue = shared; },
+  };
+  nodes.push(cNode);
+
+  const s = new DagScheduler<null>();
+  const r = await s.run(nodes, null);
+  push('A7 依赖重定向：下游 deps 指向最新节点（非废弃首轮）', JSON.stringify(observedDeps) === JSON.stringify(['a-r1', 'b-r1']), observedDeps.join(','));
+  push('A8 依赖重定向：下游读到最新结果', readValue === 'A-重出(最新)' && r.executed.join(',') === 'a,b,a-r1,b-r1,c', `read=${readValue} exec=${r.executed.join(',')}`);
+}
+
 // ============ B. Planner 默认模板 ============
 
 {
@@ -134,8 +170,10 @@ const push = (name: string, ok: boolean, detail = '') => checks.push([name, ok, 
   push('B1 Planner 默认模板 = 旧四阶段拓扑', ids === 'architect,code,economist,chief', ids);
   const codeNode = plan.find((n) => n.id === 'code');
   const chiefNode = plan.find((n) => n.id === 'chief');
+  const econNode = plan.find((n) => n.id === 'economist');
   push('B2 依赖显式化：chief 依赖 code+economist', JSON.stringify(chiefNode?.deps) === JSON.stringify(['code', 'economist']), JSON.stringify(chiefNode?.deps));
-  push('B3 code 与 economist 并行依赖 architect', JSON.stringify(codeNode?.deps) === JSON.stringify(['architect']), JSON.stringify(codeNode?.deps));
+  push('B3 时序对齐：economist 依赖 architect+code（校核后评估）', JSON.stringify(econNode?.deps) === JSON.stringify(['architect', 'code']), JSON.stringify(econNode?.deps));
+  push('B3b code 依赖 architect', JSON.stringify(codeNode?.deps) === JSON.stringify(['architect']), JSON.stringify(codeNode?.deps));
 }
 
 // ============ C. 端到端一致性：static vs dynamic（trace 模式） ============

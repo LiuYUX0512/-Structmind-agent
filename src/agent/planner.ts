@@ -107,7 +107,10 @@ export class Planner {
         label: '经济评估',
         agent: 'economist',
         kind: 'economist',
-        deps: ['architect'],
+        // 时序对齐旧四阶段：economist 在校核（code）之后执行，而非仅依赖 architect。
+        // 这样 code 触发回退时，重定向会把 economist 的依赖正确改为最新一轮的
+        // architect-r{loop} + code-r{loop}，依赖图诚实反映数据流。
+        deps: ['architect', 'code'],
       },
       {
         id: 'chief',

@@ -373,13 +373,22 @@ export class AgentPipeline {
     };
 
     const prevCodeId = loop === 0 ? 'code' : `code-r${loop}`;
+    const prevArchitectId = loop === 0 ? 'architect' : `architect-r${loop}`;
+    const nextArchitectId = `architect-r${nextLoop}`;
+    const nextCodeId = `code-r${nextLoop}`;
     return {
       __replan: true,
       insertBefore: 'economist',
       reason: `规范校核未通过，打回方案创作重出（第 ${nextLoop} 轮）`,
+      // 依赖重定向：economist / chief 原本依赖首轮 architect / code，
+      // 重出后必须改依赖最新一轮节点，否则会读到废弃的中间结果。
+      redirects: [
+        { from: prevArchitectId, to: nextArchitectId },
+        { from: prevCodeId, to: nextCodeId },
+      ],
       nodes: [
         this.bindNode({
-          id: `architect-r${nextLoop}`,
+          id: nextArchitectId,
           label: `方案创作（第 ${nextLoop} 轮重出）`,
           agent: 'architect',
           kind: 'architect',
@@ -388,11 +397,11 @@ export class AgentPipeline {
           feedback,
         }),
         this.bindNode({
-          id: `code-r${nextLoop}`,
+          id: nextCodeId,
           label: `规范校核（第 ${nextLoop} 轮复核）`,
           agent: 'code',
           kind: 'code',
-          deps: [`architect-r${nextLoop}`],
+          deps: [nextArchitectId],
           feedbackLoop: nextLoop,
         }),
       ],

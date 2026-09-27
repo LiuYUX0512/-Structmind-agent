@@ -43,6 +43,13 @@ export interface IReplanInstruction<Ctx> {
   nodes: ITaskNode<Ctx, unknown>[];
   /** 插入到哪个待执行节点之前（该节点必须存在于待执行队列） */
   insertBefore: string;
+  /**
+   * 依赖重定向：把「下游待执行节点」deps 中的 from 替换为 to。
+   * 用于回退/重出场景——当新节点取代了旧节点的中间结果时，下游必须改为
+   * 依赖最新节点，否则会读到废弃结果（依赖图不诚实）。
+   * 只作用于「插入前已存在的待执行节点」，不影响本次插入的新节点自身。
+   */
+  redirects?: Array<{ from: string; to: string }>;
   /** 本次重规划理由（写入执行轨迹，供审计 / 元认知读取） */
   reason?: string;
 }
@@ -143,6 +150,22 @@ export class DagScheduler<Ctx = unknown> {
           }
           existingIds.add(nn.id);
         }
+
+        // 依赖重定向（在插入前执行，仅作用于「插入前已存在的待执行节点」）：
+        // 把下游节点的 deps 中「被取代的旧节点」指向「新节点」，
+        // 使依赖图诚实反映最新一轮的数据流，防止下游读到废弃的中间结果。
+        // 注意顺序：先重定向、后插入——这样本次插入的新节点自身 deps 不会被误改。
+        if (result.redirects && result.redirects.length > 0) {
+          for (const pending of queue) {
+            if (pending.deps && pending.deps.length > 0) {
+              pending.deps = pending.deps.map((d) => {
+                const redir = result.redirects!.find((x) => x.from === d);
+                return redir ? redir.to : d;
+              });
+            }
+          }
+        }
+
         queue.splice(insertAt, 0, ...result.nodes);
       }
 
