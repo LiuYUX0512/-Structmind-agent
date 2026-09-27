@@ -12,7 +12,10 @@
     "lint": "concurrently npm:typecheck npm:lint:eslint",
     "lint:eslint": "eslint src",
     "precommit": "npm run lint",
-    "prepare": "node scripts/setup-git-hooks.mjs"
+    "prepare": "node scripts/setup-git-hooks.mjs",
+    "verify:norm": "vite build --config scripts/vite-verify-norm.config.ts && node scripts/verify-norm-out/verify-norm.js",
+    "verify:entry": "vite build --config scripts/vite-verify.config.ts && node scripts/verify-out/verify-entry.js",
+    "verify:agentic": "vite build --config scripts/vite-verify-agentic.config.ts && node scripts/verify-out/verify-agentic.js"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",

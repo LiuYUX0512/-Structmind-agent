@@ -19,6 +19,7 @@ import {
 } from '@/data/structure';
 import { computeSchemeScore } from './scoring';
 import { resolveKnowledgeBasis } from '@/data/code-knowledge';
+import { listKnownSystemIds } from '@/data/code-rules';
 
 /** 工具参数属性定义（JSON Schema 子集） */
 export interface IToolParamProperty {
@@ -147,25 +148,45 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
     executor: (args: Record<string, unknown>) => {
       const systemId = args.systemId as string;
       const p = args.params as Record<string, unknown>;
+      // P0-2：参数不合法时显式返回 error，让子 Agent 看到并自我纠正；
+      // 既不像旧实现那样静默兜底给出看似专业的错误答案，也不让异常冒泡打断管线
       const params: IProjectParams = {
         buildingType: (p.buildingType as string) || 'residential',
         floors: Number(p.floors) || 10,
-        area: 5000,
+        area: Number(p.area) || 5000,
         structurePreference: 'any',
         seismicIntensity: (p.seismicIntensity as string) || '7',
         soilCategory: (p.soilCategory as string) || 'Ⅱ',
         geologyType: 'clay',
-        mainSpan: 8,
+        mainSpan: Number(p.mainSpan) || 8,
         budget: 4000,
         windPressure: (p.windPressure as string) || '0.4',
         snowPressure: (p.snowPressure as string) || '0.2',
         fortificationCategory: (p.fortificationCategory as string) || 'standard',
+        // 修复：此前丢弃了用户手填的建筑高度，一律按层数×3m 估算
+        ...(p.buildingHeight ? { buildingHeight: Number(p.buildingHeight) } : {}),
       };
-      const result: INormCompliance = calculateNormCompliance(systemId, params);
+      let result: INormCompliance;
+      try {
+        result = calculateNormCompliance(systemId, params);
+      } catch (e) {
+        return {
+          error: (e as Error).message,
+          systemId,
+          hint: `请使用下列已知结构体系 ID 重试：${listKnownSystemIds().join('、')}`,
+          knownSystemIds: listKnownSystemIds(),
+          checks: [],
+          passCount: 0,
+          warningCount: 0,
+          failCount: 0,
+        };
+      }
       return {
         systemId,
         systemName: (STRUCTURE_SYSTEM_LIBRARY.find((s) => s.id === systemId)?.name) || systemId,
-        height: calculateBuildingHeight(params.floors),
+        height: params.buildingHeight && Number(params.buildingHeight) > 0
+          ? Math.round(Number(params.buildingHeight) * 10) / 10
+          : calculateBuildingHeight(params.floors),
         // 规范知识库条文依据（可追溯：每条判定可查到条文号 + 条文要旨）
         knowledgeBasis: resolveKnowledgeBasis(systemId, ['max_height', 'drift', 'swr', 'period', 'axial_ratio', 'seismic_grade']),
         standards: result.standards,
@@ -846,7 +867,21 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
       // 生成完整方案数据用于评分
       const allSchemes = generateSchemesFromParams(params);
       const filtered = allSchemes.filter((s) => schemeIds.includes(s.id));
-      const schemes = filtered.length > 0 ? filtered : allSchemes;
+
+      // P0-2：旧实现在 ID 全部无效时静默改为「比全部方案」，会给出看似合理的错误结论。
+      // 现改为显式报错并回传已知 ID，让总工 Agent 自行纠正后重试。
+      if (filtered.length === 0) {
+        return {
+          error: `待对比的方案 ID 均无效：${JSON.stringify(schemeIds)}`,
+          knownSystemIds: listKnownSystemIds(),
+          hint: '请使用候选方案列表中出现的 ID 重试',
+          ranking: [],
+          recommended: { schemeId: '', schemeName: '', overallScore: 0 },
+        };
+      }
+      // 部分无效：只比有效的，并如实告知被忽略的 ID
+      const ignoredIds = schemeIds.filter((id) => !filtered.some((s) => s.id === id));
+      const schemes = filtered;
 
       const weightTotal = (w.cost || 0) + (w.duration || 0) + (w.safety || 0) + (w.green || 0) || 100;
 
@@ -915,6 +950,7 @@ export const TOOL_REGISTRY: IRegisteredTool[] = [
         ranking: results,
         weights: w,
         weightTotal,
+        ...(ignoredIds.length > 0 ? { ignoredIds, warning: `已忽略无效方案 ID：${ignoredIds.join('、')}` } : {}),
         recommended: {
           schemeId: results[0]?.schemeId || '',
           schemeName: results[0]?.schemeName || '',

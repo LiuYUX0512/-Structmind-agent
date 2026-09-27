@@ -10,6 +10,10 @@
 // calculateNormCompliance, calculateBuildingHeight, checkExtremeParams,
 // estimateCarbonEmission, estimatePrecastRate, estimateConstructionRisk
 
+import { evaluateCompliance } from './norm-evaluator';
+import { calculateBuildingHeight, getHeightLimit, isKnownSystem } from './code-rules';
+import { resolveBuildingHeight } from './norm-evaluator';
+
 // ============ 类型定义 ============
 
 export interface IProjectParams {
@@ -58,6 +62,8 @@ export interface INormCheckItem {
   reason?: string;
   /** 完整出处（标准编号 + 条文号） */
   source?: string;
+  /** 条文严重性：mandatory=强制性条文（超限必须判 fail）；general=一般控制指标；advisory=提示性措施 */
+  severity?: 'mandatory' | 'general' | 'advisory';
 }
 
 export interface INormCompliance {
@@ -215,605 +221,22 @@ export const MOCK_PROJECT_PARAMS: IProjectParams = {
 
 // ============ 工具函数 ============
 
-/** 估算建筑高度（按层高 3m 计） */
-export function calculateBuildingHeight(floors: number): number {
-  return Math.round(floors * 3 * 10) / 10;
-}
+// ============ 规范规则层 / 判定层（已拆分为 code-rules.ts + norm-evaluator.ts）============
+// 拆分原因见架构诊断 P0-1：规则（判什么/依据哪条/严重性）与计算（估算值）混写，
+// 导致剪重比、周期比恒 pass、高度超限被降级为 warning 等判定失真问题。
+export { calculateBuildingHeight, getHeightLimit, DRIFT_LIMITS, SHEAR_WEIGHT_RATIO_MIN } from './code-rules';
+export { evaluateCompliance, estimateSeismicShearCoefficient, estimateTorsionPeriodRatio } from './norm-evaluator';
 
 /**
- * 按 GB/T 50011 查表得到各结构体系的弹性层间位移角限值
- * 规范来源：《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）表 5.5.1
- * 强制性通用规范：GB 55002-2021《建筑与市政工程抗震通用规范》第 5.1.1 条
- * 注：组合结构/砌体/木结构/空间桁架表5.5.1未单列，为工程经验参考值
- */
-const DRIFT_LIMITS: Record<string, number> = {
-    frame: 1 / 550,
-    'frame-shearwall': 1 / 800,
-    shearwall: 1 / 1000,
-    steel: 1 / 250,
-    prefabricated: 1 / 800,
-    'prefab-steel': 1 / 250,
-    composite: 1 / 650,
-    masonry: 1 / 1200,
-    'frame-corewall': 1 / 800,
-    'tube-in-tube': 1 / 1000,
-    'mass-timber': 1 / 350,
-    'space-truss': 1 / 300,
-    'frame-corewall-frame': 1 / 800,
-  };
-
-/**
- * 各结构体系在多遇地震下层间位移角的经验估算（简化）
- * 基于 8度设防、Ⅱ类场地、100m 高度的经验值，按烈度/高度/场地线性修正
- */
-function estimateDriftRatio(
-  schemeId: string,
-  intensity: number,
-  height: number,
-  soilCategory: string
-): number {
-  // 基准值（8度、100m、Ⅱ类场地，经验估算）
-  const baseDrift: Record<string, number> = {
-    frame: 1 / 400,
-    'frame-shearwall': 1 / 900,
-    shearwall: 1 / 1200,
-    steel: 1 / 220,
-    prefabricated: 1 / 850,
-    'prefab-steel': 1 / 230,
-    composite: 1 / 500,
-    masonry: 1 / 1500,
-    'frame-corewall': 1 / 950,
-    'tube-in-tube': 1 / 850,
-    'mass-timber': 1 / 300,
-    'space-truss': 1 / 250,
-  };
-
-  let drift = baseDrift[schemeId] || 1 / 800;
-
-  // 烈度修正：每增减1度，地震影响系数最大值 α_max 约翻倍（GB/T 50011 表 5.1.4-1）
-  // 弹性层间位移角与地震作用大致成正比，考虑刚度随烈度略有调整，取 1.8 倍/度
-  const intensityFactor = Math.pow(1.8, intensity - 8);
-  drift *= intensityFactor;
-
-  // 高度修正：100m基准，越高位移角越大
-  const heightFactor = height / 100;
-  drift *= Math.max(0.5, Math.min(2, heightFactor));
-
-  // 场地类别修正：Ⅲ/Ⅳ类场地土位移角略有增大
-  if (soilCategory === 'Ⅲ') drift *= 1.1;
-  if (soilCategory === 'Ⅳ') drift *= 1.2;
-
-  return drift;
-}
-
-/**
- * 剪重比（楼层最小地震剪力系数）最小值
- * 依据：GB 55002-2021《建筑与市政工程抗震通用规范》第 4.2.3 条（强制性）
- *        及 GB/T 50011-2010（2024年局部修订）表 5.2.5
- * 说明：本工具按 7度0.10g、8度0.20g 取值；
- *       设计基本地震加速度为 7度0.15g、8度0.30g 的地区，
- *       框架结构剪重比最小值分别取 0.036、0.072，
- *       其他结构分别取 0.024、0.048。
- */
-const SHEAR_WEIGHT_RATIO_MIN: Record<string, Record<string, number>> = {
-  '6': { frame: 0.012, other: 0.008 },
-  '7': { frame: 0.024, other: 0.016 },
-  '8': { frame: 0.048, other: 0.032 },
-  '9': { frame: 0.096, other: 0.064 },
-};
-
-/**
- * 估算剪重比（经验法）
- * 简化计算：剪重比 ≈ 烈度系数 × 结构类型系数 × 场地修正
- */
-function estimateShearWeightRatio(
-  schemeId: string,
-  intensity: string,
-  soilCategory: string
-): number {
-  const isFrame = schemeId === 'frame';
-  const key = isFrame ? 'frame' : 'other';
-  const minValue = SHEAR_WEIGHT_RATIO_MIN[intensity]?.[key] || 0.016;
-
-  // 经验估算值通常为最小值的 1.2~1.5 倍（有安全储备）
-  let ratio = minValue * 1.3;
-
-  // 场地修正：软场地地震动放大效应显著，剪重比增大；硬场地剪重比降低
-  // Ⅳ类场地特征周期长，地震剪力比Ⅱ类场地约增大 15%；Ⅰ类场地约减小 10%
-  if (soilCategory === 'Ⅰ') ratio *= 0.9;
-  if (soilCategory === 'Ⅲ') ratio *= 1.05;
-  if (soilCategory === 'Ⅳ') ratio *= 1.15;
-
-  return Math.round(ratio * 10000) / 10000;
-}
-
-/**
- * 估算结构基本周期（经验公式）
- * 框架结构：T1 ≈ 0.1n（n为层数）
- * 框剪/框筒：T1 ≈ 0.08n
- * 剪力墙/筒中筒：T1 ≈ 0.06n
- * 钢结构：T1 ≈ 0.12n
- */
-function estimatePeriod(schemeId: string, floors: number): number {
-  const coeffMap: Record<string, number> = {
-    frame: 0.1,
-    'frame-shearwall': 0.08,
-    shearwall: 0.06,
-    steel: 0.12,
-    prefabricated: 0.09,
-    'prefab-steel': 0.11,
-    composite: 0.085,
-    masonry: 0.07,
-    'frame-corewall': 0.06,
-    'tube-in-tube': 0.055,
-    'mass-timber': 0.095,
-    'space-truss': 0.15,
-  };
-  const coeff = coeffMap[schemeId] || 0.08;
-  return Math.round(coeff * floors * 100) / 100;
-}
-
-/**
- * 估算扭转周期比 Tt/T1
- * 经验值：规则建筑 0.6~0.85，不规则可能更高
- * 限制：A级高度 ≤ 0.9，B级高度 ≤ 0.85
- */
-function estimatePeriodRatio(schemeId: string): number {
-  const ratioMap: Record<string, number> = {
-    frame: 0.8,
-    'frame-shearwall': 0.75,
-    shearwall: 0.7,
-    steel: 0.82,
-    prefabricated: 0.78,
-    'prefab-steel': 0.8,
-    composite: 0.78,
-    masonry: 0.72,
-    'frame-corewall': 0.68,
-    'tube-in-tube': 0.62,
-    'mass-timber': 0.75,
-    'space-truss': 0.85,
-  };
-  return ratioMap[schemeId] || 0.75;
-}
-
-/**
- * 规范符合性计算 - 基于真实简化公式
- * 返回包含计算链的 INormCompliance
+ * 规范符合性计算
+ * @description 转发至判定层 norm-evaluator.evaluateCompliance；对外签名与返回结构保持不变。
+ * @throws 未知结构体系 / 未知场地类别时抛错（不再静默兜底）
  */
 export function calculateNormCompliance(
   schemeId: string,
   params: IProjectParams
 ): INormCompliance {
-  // 烈度数值化 + 越界保护（非法输入默认按 7 度处理）
-  const parsedIntensity = parseInt(params.seismicIntensity, 10);
-  const intensity = isNaN(parsedIntensity) ? 7 : Math.max(6, Math.min(9, parsedIntensity));
-  const height = calculateBuildingHeight(params.floors);
-
-  const schemeStandardsMap: Record<string, string[]> = {
-    frame: [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《建筑结构荷载规范》GB 50009-2012',
-    ],
-    'frame-shearwall': [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《高层建筑混凝土结构技术规程》JGJ 3-2010',
-      '《建筑结构荷载规范》GB 50009-2012',
-    ],
-    shearwall: [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《高层建筑混凝土结构技术规程》JGJ 3-2010',
-    ],
-    steel: [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-      '《钢结构设计标准》GB/T 50017-2017',
-      '《高层民用建筑钢结构技术规程》JGJ 99-2015',
-      '《建筑设计防火规范》GB 50016-2014（2018版）',
-    ],
-    prefabricated: [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-      '《装配式混凝土建筑技术标准》GB/T 51231-2016',
-      '《装配式建筑评价标准》GB/T 51129-2017',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-    ],
-    'prefab-steel': [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55006-2021《钢结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《钢结构设计标准》GB/T 50017-2017',
-      '《装配式钢结构建筑技术标准》GB/T 51232-2016',
-      '《装配式建筑评价标准》GB/T 51129-2017',
-    ],
-    composite: [
-      'GB 55004-2021《组合结构通用规范》（强制性）',
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《钢结构设计标准》GB/T 50017-2017',
-    ],
-    masonry: [
-      'GB 55007-2021《砌体结构通用规范》（强制性）',
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《砌体结构设计规范》GB 50003-2011',
-      '《建筑抗震设计标准》GB/T 50011-2010（2024年局部修订）',
-    ],
-    'frame-corewall': [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《高层建筑混凝土结构技术规程》JGJ 3-2010',
-    ],
-    'tube-in-tube': [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55008-2021《混凝土结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《混凝土结构设计标准》GB/T 50010-2010（2024年局部修订）',
-      '《高层建筑混凝土结构技术规程》JGJ 3-2010',
-    ],
-    'mass-timber': [
-      'GB 55005-2021《木结构通用规范》（强制性）',
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《木结构设计标准》GB 50005-2017',
-    ],
-    'space-truss': [
-      'GB 55002-2021《建筑与市政工程抗震通用规范》（强制性）',
-      'GB 55006-2021《钢结构通用规范》（强制性）',
-      'GB 55037-2022《建筑防火通用规范》（强制性）',
-      '《钢结构设计标准》GB/T 50017-2017',
-      '《空间网格结构技术规程》JGJ 7-2010',
-    ],
-  };
-
-  const schemeNameMap: Record<string, string> = {
-    frame: '框架结构',
-    'frame-shearwall': '框架-剪力墙结构',
-    shearwall: '剪力墙结构',
-    steel: '钢结构',
-    prefabricated: '装配式结构',
-  };
-
-  const driftLimit = DRIFT_LIMITS[schemeId] || 1 / 800;
-  const driftEstimate = estimateDriftRatio(
-    schemeId,
-    intensity,
-    height,
-    params.soilCategory
-  );
-  const driftRatioPass = driftEstimate <= driftLimit;
-  const driftRatioNearLimit = driftEstimate / driftLimit > 0.9;
-
-  const swrMin =
-    (SHEAR_WEIGHT_RATIO_MIN[params.seismicIntensity]?.[
-      schemeId === 'frame' ? 'frame' : 'other'
-    ]) || 0.016;
-  const swrEstimate = estimateShearWeightRatio(
-    schemeId,
-    params.seismicIntensity,
-    params.soilCategory
-  );
-
-  const T1 = estimatePeriod(schemeId, params.floors);
-  const TtT1 = estimatePeriodRatio(schemeId);
-  const periodLimit = height > 150 ? 0.85 : 0.9; // B级高度限值更严
-
-  const schemeName = schemeNameMap[schemeId] || schemeId;
-  const standards = schemeStandardsMap[schemeId] || schemeStandardsMap['frame-shearwall'];
-
-  // 规范条文文本表（已核实准确）
-  const clauseTemplates: Record<string, { clauseText: string; source: string }> = {
-    drift: {
-      clauseText:
-        '多遇地震作用下，结构弹性层间位移角应满足限值要求：框架结构 1/550；框架-抗震墙、板柱-抗震墙、框架-核心筒 1/800；抗震墙、筒中筒 1/1000；多高层钢结构 1/250。该限值用于控制结构在多遇地震下的侧向变形，保证非结构构件不发生严重破坏，过大说明结构侧向刚度不足。',
-      source: 'GB/T 50011-2010（2024年局部修订）表 5.5.1 弹性层间位移角限值',
-    },
-    swr: {
-      clauseText:
-        '结构各楼层对应于地震作用标准值的楼层剪力系数 λ 不应小于 λ_min。框架结构：6度(0.05g) 0.008、7度(0.10g) 0.012、8度(0.20g) 0.024、9度(0.40g) 0.048；其他结构体系为框架结构的 2/3：0.004 / 0.008 / 0.016 / 0.032。剪重比不足说明地震作用偏小，需按规定进行调整。',
-      source: 'GB 55002-2021 第 4.2.3 条；GB/T 50011-2010（2024年局部修订）表 5.2.5',
-    },
-    period: {
-      clauseText:
-        '结构扭转为主的第一自振周期 Tt 与平动为主的第一自振周期 T1 之比，A级高度高层建筑不应大于 0.90，B级高度高层建筑（>150m）不应大于 0.85。周期比用于控制结构扭转效应，防止扭转为主的破坏模式。',
-      source: 'JGJ 3-2010《高层建筑混凝土结构技术规程》第 3.4.5 条',
-    },
-    height: {
-      clauseText:
-        '现浇钢筋混凝土房屋的最大适用高度应符合规范要求（单位 m）：框架结构 6/7度 60m、8度 40m、9度 24m；框架-抗震墙 130/120/100/50m；全落地抗震墙 140/120/100/60m；框架-核心筒 150/130/100/70m；筒中筒 180/150/120/80m。超限工程需进行专项论证。',
-      source: 'GB/T 50011-2010（2024年局部修订）表 6.1.1',
-    },
-    axialRatio: {
-      clauseText:
-        '抗震墙底部加强部位墙肢轴压比限值：一级（9度）≤ 0.40；一级（7、8度）≤ 0.50；二、三级 ≤ 0.60。轴压比是控制墙肢延性、防止脆性破坏的重要指标。',
-      source: 'GB/T 50010-2010（2024年局部修订）第 11.7.16 条',
-    },
-    fireSteel: {
-      clauseText:
-        '一级耐火等级高层建筑，钢柱耐火极限不应低于 3.00h，钢梁不应低于 2.00h，楼板不应低于 1.50h。钢结构必须采取防火保护措施（防火涂料、防火板等）。',
-      source: 'GB 55037-2022《建筑防火通用规范》表 5.2.1',
-    },
-  };
-
-  // 生成判定理由：结合参数和状态给出工程解释
-  function buildDriftReason(
-    status: 'pass' | 'warning' | 'fail',
-    nearLimit: boolean,
-    systemName: string,
-    driftVal: number,
-    limitVal: number
-  ): string {
-    if (status === 'pass' && !nearLimit) {
-      return `本工程约 ${height}m 高${systemName}，在${intensity}度多遇地震作用下位移角约 1/${Math.round(1 / driftVal)}，小于限值 1/${Math.round(1 / limitVal)}，侧向刚度有充足余量。`;
-    }
-    if (status === 'pass' && nearLimit) {
-      return `位移角 1/${Math.round(1 / driftVal)} 接近限值 1/${Math.round(1 / limitVal)}，侧向刚度偏紧，设计中应注意合理布置剪力墙和核心筒，避免刚度不足。`;
-    }
-    return `位移角 1/${Math.round(1 / driftVal)} 超出限值 1/${Math.round(1 / limitVal)}，说明该${systemName}体系在${intensity}度地震作用下侧向刚度不足，需增设抗震墙或加大构件截面。`;
-  }
-
-  function buildSwrReason(status: 'pass' | 'warning' | 'fail', val: number, min: number): string {
-    if (status === 'pass') {
-      return `估算剪重比约 ${(val * 100).toFixed(2)}%，高于规范最小值 ${(min * 100).toFixed(1)}%，地震作用满足最小剪力要求，基底剪力安全储备充足。`;
-    }
-    return `估算剪重比约 ${(val * 100).toFixed(2)}%，接近或略低于规范限值 ${(min * 100).toFixed(1)}%，设计阶段应注意按规范第 5.2.5 条调整地震作用放大系数。`;
-  }
-
-  function buildPeriodReason(status: 'pass' | 'warning' | 'fail', val: number, limit: number): string {
-    if (status === 'pass') {
-      return `估算周期比 Tt/T1 ≈ ${val.toFixed(2)}，满足规范限值 ${limit}，说明结构平面布置较规则，扭转效应可控，抗扭性能良好。`;
-    }
-    return `周期比 Tt/T1 ≈ ${val.toFixed(2)} 接近限值 ${limit}，需在设计中注意调整结构布置，使抗侧力构件尽量均匀分布，减小扭转效应。`;
-  }
-
-  function buildHeightReason(status: 'pass' | 'warning' | 'fail', h: number, limit: number, systemName: string): string {
-    if (status === 'pass') {
-      return `建筑高度 ${h}m ≤ 规范适用最大高度 ${limit}m（${systemName}，${intensity}度），属于常规适用范围，无需超限专项论证。`;
-    }
-    return `建筑高度 ${h}m 接近或超出规范适用最大高度 ${limit}m（${systemName}，${intensity}度），属于超限高层范畴，需按规定组织超限工程抗震设防专项审查。`;
-  }
-
-  function buildAxialRatioReason(status: 'pass' | 'warning' | 'fail', est: string, limit: number, grade: string): string {
-    if (status === 'pass') {
-      return `底部加强部位墙肢轴压比估算 ${est}，低于限值 ${limit.toFixed(2)}（${grade}），墙肢延性满足要求，可保证大震下的变形能力。`;
-    }
-    return `墙肢轴压比估算 ${est} 接近限值 ${limit.toFixed(2)}（${grade}），设计中应注意底部加强部位墙肢截面和混凝土强度等级的合理匹配。`;
-  }
-
-  const checks: INormCheckItem[] = [
-    {
-      name: '层间位移角',
-      status: driftRatioPass ? (driftRatioNearLimit ? 'warning' : 'pass') : 'fail',
-      value: `1/${Math.round(1 / driftEstimate)}`,
-      requirement: `≤ 1/${Math.round(1 / driftLimit)}（${schemeName}）`,
-      description: driftRatioPass
-        ? '风荷载及多遇地震作用下弹性层间位移角满足规范限值要求'
-        : '层间位移角超出规范限值，需调整结构布置或增大刚度',
-      calcChain: {
-        basis: 'GB/T 50011-2010（2024局部修订）表 5.5.1 弹性层间位移角限值；强制性通用规范 GB 55002-2021 第 5.1.1 条',
-        input: `烈度 ${intensity}度、高度 ${height}m、场地 ${params.soilCategory}类、层数 ${params.floors}层`,
-        formula: 'Δu/h = 基准值 × 烈度修正 × 高度修正 × 场地修正',
-        result: `估算值 1/${Math.round(1 / driftEstimate)}，限值 1/${Math.round(1 / driftLimit)}`,
-      },
-      clauseText: clauseTemplates.drift.clauseText,
-      source: clauseTemplates.drift.source,
-      reason: buildDriftReason(
-        driftRatioPass ? (driftRatioNearLimit ? 'warning' : 'pass') : 'fail',
-        driftRatioNearLimit,
-        schemeName,
-        driftEstimate,
-        driftLimit
-      ),
-    },
-    {
-      name: '剪重比',
-      status: swrEstimate >= swrMin ? 'pass' : 'warning',
-      value: `${(swrEstimate * 100).toFixed(2)}%`,
-      requirement: `≥ ${(swrMin * 100).toFixed(1)}%（${params.seismicIntensity}度设防）`,
-      description:
-        swrEstimate >= swrMin
-          ? '各楼层地震剪力系数满足规范最小值要求，安全储备充足'
-          : '剪重比接近或略低于规范最小值，需考虑按规范调整地震作用',
-      calcChain: {
-        basis: 'GB 55002-2021 第 4.2.3 条（强制性）及 GB/T 50011-2010 表 5.2.5 楼层最小地震剪力系数',
-        input: `烈度 ${params.seismicIntensity}度、${schemeId === 'frame' ? '框架' : '其他'}结构、场地 ${params.soilCategory}类`,
-        formula: 'λ ≥ λ_min × 场地修正（经验估算含1.3倍安全储备）',
-        result: `估算 ${(swrEstimate * 100).toFixed(2)}%，限值 ${(swrMin * 100).toFixed(1)}%`,
-      },
-      clauseText: clauseTemplates.swr.clauseText,
-      source: clauseTemplates.swr.source,
-      reason: buildSwrReason(swrEstimate >= swrMin ? 'pass' : 'warning', swrEstimate, swrMin),
-    },
-    {
-      name: '周期比 Tt/T1',
-      status: TtT1 <= periodLimit ? 'pass' : 'warning',
-      value: TtT1.toFixed(2),
-      requirement: `≤ ${periodLimit}（${height > 150 ? 'B级高度' : 'A级高度'}）`,
-      description:
-        TtT1 <= periodLimit
-          ? '扭转周期与平动周期之比满足规范要求，结构抗扭性能良好'
-          : '周期比接近限值，需优化结构布置以减小扭转效应',
-      calcChain: {
-        basis: 'JGJ 3-2010《高层建筑混凝土结构技术规程》第 3.4.5 条 扭转周期与平动周期比限值',
-        input: `估算第一平动周期 T1 ≈ ${T1.toFixed(2)}s（经验公式 T1 ≈ 系数×层数）`,
-        formula: 'Tt/T1 = 经验系数（规则建筑 0.6~0.85）',
-        result: `Tt/T1 ≈ ${TtT1.toFixed(2)}，限值 ${periodLimit}`,
-      },
-      clauseText: clauseTemplates.period.clauseText,
-      source: clauseTemplates.period.source,
-      reason: buildPeriodReason(TtT1 <= periodLimit ? 'pass' : 'warning', TtT1, periodLimit),
-    },
-    {
-      name: '高度适用范围',
-      status: checkHeightApplicability(schemeId, height, intensity)
-        ? 'pass'
-        : 'warning',
-      value: `${height} m`,
-      requirement: `≤ ${getHeightLimit(schemeId, intensity)} m（${params.seismicIntensity}度）`,
-      description: checkHeightApplicability(schemeId, height, intensity)
-        ? '建筑高度在该结构体系的规范适用范围内'
-        : '建筑高度接近或超出该体系常规适用高度，需进行专门论证',
-      calcChain: {
-        basis: 'GB/T 50011-2010（2024局部修订）表 6.1.1（混凝土）/表 8.1.1（钢结构）/表 7.1.2（砌体）结构体系适用最大高度',
-        input: `${schemeName}、${intensity}度设防、建筑高度 ${height}m`,
-        formula: 'H ≤ H_max(结构体系, 设防烈度)',
-        result: `${height}m ≤ ${getHeightLimit(schemeId, intensity)}m`,
-      },
-      clauseText: clauseTemplates.height.clauseText,
-      source: clauseTemplates.height.source,
-      reason: buildHeightReason(
-        checkHeightApplicability(schemeId, height, intensity) ? 'pass' : 'warning',
-        height,
-        getHeightLimit(schemeId, intensity),
-        schemeName
-      ),
-    },
-  ];
-
-  // 根据结构体系添加额外检查项
-  if (schemeId === 'shearwall' || schemeId === 'frame-shearwall') {
-    // 按设防烈度与房屋高度近似对应抗震等级
-    // 一级：9度 / 8度高层(H>80m)；二级：7度高层 / 8度多层；三级：6度 / 7度多层
-    // 对应轴压比限值：一级(9度)0.40，一级(7/8度)0.50，二三级0.60
-    const isHighrise = height > 80;
-    const isGrade1Nine = intensity >= 9;
-    const isGrade1SevenEight = intensity >= 7 && isHighrise;
-    const isGrade23 = !isGrade1Nine && !isGrade1SevenEight;
-
-    let nRatioMin = 0.35;
-    let nRatioMax = 0.45;
-    let limitValue = 0.60;
-    let gradeLabel = '二、三级';
-
-    if (isGrade1Nine) {
-      nRatioMin = 0.35;
-      nRatioMax = 0.42;
-      limitValue = 0.40;
-      gradeLabel = '一级（9度）';
-    } else if (isGrade1SevenEight) {
-      nRatioMin = 0.40;
-      nRatioMax = 0.48;
-      limitValue = 0.50;
-      gradeLabel = '一级（7/8度）';
-    } else {
-      nRatioMin = 0.42;
-      nRatioMax = 0.55;
-      limitValue = 0.60;
-      gradeLabel = '二、三级';
-    }
-
-    const estimated = `${nRatioMin.toFixed(2)}~${nRatioMax.toFixed(2)}`;
-    const nRatioAvg = (nRatioMin + nRatioMax) / 2;
-    const pass = nRatioMax <= limitValue;
-    const nearLimit = nRatioAvg / limitValue > 0.85;
-
-    checks.push({
-      name: '抗震墙墙肢轴压比（估算）',
-      status: pass ? (nearLimit ? 'warning' : 'pass') : 'fail',
-      value: estimated,
-      requirement: `≤ ${limitValue.toFixed(2)}（底部加强部位，${gradeLabel}）`,
-      description:
-        pass
-          ? '底部加强部位墙肢轴压比满足规范限值要求，有一定安全储备'
-          : '墙肢轴压比接近或超出限值，需加大墙肢截面或提高混凝土强度等级',
-      calcChain: {
-        basis: 'GB/T 50011 第 6.4.2 条 及 GB/T 50010 表 11.7.16 剪力墙轴压比限值',
-        input: `${intensity}度设防、房屋高度 ${height}m、底部加强部位、近似抗震等级 ${gradeLabel}`,
-        formula: 'N/(fc·A)，按经验估算，仅供方案阶段参考',
-        result: `估算 ${estimated}，限值 ${limitValue.toFixed(2)}`,
-      },
-      clauseText: clauseTemplates.axialRatio.clauseText,
-      source: clauseTemplates.axialRatio.source,
-      reason: buildAxialRatioReason(pass ? (nearLimit ? 'warning' : 'pass') : 'fail', estimated, limitValue, gradeLabel),
-    });
-  }
-
-  if (schemeId === 'steel') {
-    checks.push({
-      name: '防火保护',
-      status: 'warning',
-      description: '钢结构构件需做防火涂料保护，柱3h、梁2h耐火极限',
-      calcChain: {
-        basis: 'GB 55037-2022《建筑防火通用规范》（强制性）及 GB 50016-2014（2018年版）第 5.1.2 条',
-        input: '钢结构柱、梁、楼板',
-        formula: '按建筑高度和耐火等级确定构件耐火极限',
-        result: '需防火涂料保护',
-      },
-      clauseText:
-        '一级耐火等级高层建筑，钢柱耐火极限不应低于 3.00h，钢梁不应低于 2.00h，楼板不应低于 1.50h。钢结构必须采取防火保护措施（如厚涂型/薄涂型防火涂料、防火板包覆等），方可满足规范耐火极限要求。',
-      source: 'GB 55037-2022《建筑防火通用规范》表 5.2.1 构件耐火极限要求',
-      reason:
-        `钢结构自身耐火性能差（约 15min 即失稳），本工程约 ${height}m 高建筑按一级耐火等级设计，钢柱需达到 3h、钢梁 2h 耐火极限，需做防火涂料或防火板包覆，防火保护造价约占结构造价 3~5%。`,
-    });
-  }
-
-  const passCount = checks.filter((c) => c.status === 'pass').length;
-  const warnCount = checks.filter((c) => c.status === 'warning').length;
-  const failCount = checks.filter((c) => c.status === 'fail').length;
-
-  let summary = '';
-  if (failCount > 0) {
-    summary = `有 ${failCount} 项指标不满足规范要求，需重新评估结构方案。`;
-  } else if (warnCount > 0) {
-    summary = `各项主要控制指标基本满足规范要求，有 ${warnCount} 项指标接近限值或需注意，设计中应予关注。`;
-  } else {
-    summary = '各项控制指标均满足规范要求，抗震安全储备充足。';
-  }
-  summary += ' 本计算基于经验公式与简化假定，仅用于方案前期概念比选与决策参考，不构成任何设计依据；实际工程设计必须由注册结构工程师主持，采用专业结构分析软件按现行国家标准逐项复核。';
-
-  return { standards, checks, summary };
-}
-
-/**
- * 各结构体系在不同设防烈度下的适用最大高度（m）
- * 依据：GB/T 50011-2010（2024年局部修订）表6.1.1（混凝土结构）、表8.1.1（钢结构）、表7.1.2（砌体）
- * 说明：
- *   - 未在表中明确单列的体系（钢-混组合、胶合木、空间桁架、装配式）为方案阶段经验参考值
- *   - 大跨空间结构以跨度控制为主，高度限值仅供参考
- *   - 强制性通用规范 GB 55002-2021 第3.1.3条对适用范围有总体要求
- */
-function getHeightLimit(schemeId: string, intensity: number): number {
-  const limits: Record<string, Record<number, number>> = {
-    frame: { 6: 60, 7: 50, 8: 40, 9: 24 },
-    'frame-shearwall': { 6: 130, 7: 120, 8: 100, 9: 50 },
-    shearwall: { 6: 140, 7: 120, 8: 100, 9: 60 },
-    steel: { 6: 110, 7: 110, 8: 90, 9: 50 },
-    prefabricated: { 6: 80, 7: 70, 8: 60, 9: 30 },
-    'prefab-steel': { 6: 110, 7: 110, 8: 90, 9: 50 },
-    composite: { 6: 130, 7: 120, 8: 100, 9: 50 },
-    masonry: { 6: 21, 7: 21, 8: 18, 9: 12 },
-    'frame-corewall': { 6: 150, 7: 130, 8: 100, 9: 70 },
-    'tube-in-tube': { 6: 180, 7: 150, 8: 120, 9: 80 },
-    'mass-timber': { 6: 20, 7: 16, 8: 12, 9: 8 },
-    'space-truss': { 6: 50, 7: 45, 8: 35, 9: 25 },
-  };
-  return limits[schemeId]?.[intensity] || 100;
-}
-
-function checkHeightApplicability(
-  schemeId: string,
-  height: number,
-  intensity: number
-): boolean {
-  return height <= getHeightLimit(schemeId, intensity);
+  return evaluateCompliance(schemeId, params);
 }
 
 /**
@@ -1307,7 +730,7 @@ export function suggestFoundation(
  */
 export function checkExtremeParams(params: IProjectParams): IExtremeParamAlert {
   const reasons: string[] = [];
-  const height = calculateBuildingHeight(params.floors);
+  const height = resolveBuildingHeight(params);
 
   // 层数 > 60 层
   if (params.floors > 60) {
@@ -1331,7 +754,7 @@ export function checkExtremeParams(params: IProjectParams): IExtremeParamAlert {
 
   // 高度与结构体系严重不匹配
   const intensity = parseInt(params.seismicIntensity, 10);
-  if (params.structurePreference !== 'any') {
+  if (params.structurePreference !== 'any' && isKnownSystem(params.structurePreference)) {
     const limit = getHeightLimit(params.structurePreference, intensity);
     if (height > limit * 1.5) {
       const nameMap: Record<string, string> = {
@@ -1739,7 +1162,7 @@ export const STRUCTURE_SYSTEM_LIBRARY: IStructureScheme[] = [
 // 智能方案筛选与生成：从12类结构体系中，根据项目参数动态筛选最适用的3个方案
 // 筛选逻辑：高度适配性 + 建筑类型匹配 + 跨度匹配 + 预算约束 + 抗震需求 → 综合评分 → top 3
 export function generateSchemesFromParams(params: IProjectParams): IStructureScheme[] {
-  const height = calculateBuildingHeight(params.floors);
+  const height = resolveBuildingHeight(params);
   const parsedIntensity = parseInt(params.seismicIntensity, 10);
   const intensity = isNaN(parsedIntensity) ? 7 : Math.max(6, Math.min(9, parsedIntensity));
 
