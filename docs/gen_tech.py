@@ -107,20 +107,24 @@ def add_para(doc, text, style="Normal", size=None, bold=None, color=None,
 
 def add_heading(doc, text, level=1):
     p = doc.add_heading(text, level=level)
+    p.paragraph_format.keep_with_next = True
     return p
 
 
 def add_caption(doc, text):
-    add_para(doc, text, style="Caption")
+    return add_para(doc, text, style="Caption")
 
 
-def add_figure(doc, img, caption, width_cm=14.5):
+def add_figure(doc, img, caption, width_cm=13.5):
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.keep_together = True
     p.paragraph_format.keep_with_next = True
     run = p.add_run()
     run.add_picture(img, width=Cm(width_cm))
-    add_caption(doc, caption)
+    cap = add_caption(doc, caption)
+    cap.paragraph_format.keep_together = True
+    return p
 
 
 def set_table_props(t):
@@ -279,17 +283,6 @@ add_para(doc, "提交日期：2026 年 9 月 28 日", size=11.5, color=DEEP, ali
 add_para(doc, "团队成员：刘宇翔（负责人）、李国扬、吕勇宽、张盛涵", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 add_para(doc, "所属学院：土木工程 · 指导教师：无", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 
-# ---------- 目录分节 ----------
-sec2 = doc.add_section(WD_SECTION.NEW_PAGE)
-sec2.top_margin = Cm(2.5)
-sec2.bottom_margin = Cm(2.5)
-sec2.left_margin = Cm(2.8)
-sec2.right_margin = Cm(2.8)
-sec2.header.is_linked_to_previous = False
-sec2.footer.is_linked_to_previous = False
-add_heading(doc, "目  录", level=1)
-add_toc_field(doc)
-
 # ---------- 正文分节 ----------
 sec3 = doc.add_section(WD_SECTION.NEW_PAGE)
 sec3.top_margin = Cm(2.5)
@@ -385,7 +378,7 @@ add_para(doc, "使用步骤：① 打开链接进入首页；② 在参数录入
 add_para(doc, "测试问题：①“帮我做一个八层办公楼，建筑面积 8000㎡，跨度 8.4 米，设防烈度 7 度”；②“预算收紧到 1.2 亿，帮我重新比选”；③“哪套方案碳排放最低？”")
 
 add_heading(doc, "3.2 案例展示", 2)
-add_figure(doc, os.path.join(IMG, "ui_demo.png"), "图 3  智构 StructMind 产品主界面（线上 Demo）", width_cm=12.0)
+add_figure(doc, os.path.join(IMG, "ui_demo.png"), "图 3  智构 StructMind 产品主界面（线上 Demo）", width_cm=11.0)
 add_para(doc, "案例流程：输入上述测试问题①后，系统依次调度意图理解、方案创作、规范校核、经济评估、总工评审五个智能体，完整展示推理轨迹；规范校核发现某项不满足时自动回退重算。最终输出三套候选方案（框架 / 框架—剪力墙 / 钢结构）及七维比选雷达图与关键指标对比（以下为运行示例数据）。")
 add_figure(doc, os.path.join(IMG, "fig_radar.png"), "图 4  候选方案七维综合比选雷达图（示例数据）")
 add_figure(doc, os.path.join(IMG, "fig_compare.png"), "图 5  三套候选方案关键指标对比（示例数据）")
