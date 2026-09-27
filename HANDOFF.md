@@ -64,7 +64,7 @@
    git commit -m "deploy: sync main"
    git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push --force https://github.com/LiuYUX0512/-Structmind-agent.git HEAD:gh-pages
    ```
-   说明：线上 Demo 部署自 `gh-pages` 分支（构建产物），与 `main`（源码）分离，必须手动重建同步。仓库已配置 `.github/workflows/deploy.yml` 云端自动部署通道，但不保证每次成功，**以手动同步为最终保障**。
+   说明：线上 Demo 部署自 `gh-pages` 分支（构建产物），与 `main`（源码）分离，**必须手动重建同步，这是唯一可靠的发布通道**。
 5. 验收标准：可正常复现运行的 Demo + 完整参赛材料 + 所有改动已同步回仓库。
 
 ---
