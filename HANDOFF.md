@@ -17,7 +17,7 @@
 
 - GitHub 仓库（公开）：https://github.com/LiuYUX0512/-Structmind-agent
 - 线上 Demo（GitHub Pages）：https://liuyux0512.github.io/-Structmind-agent/
-- 本地权威仓库：`C:\Users\31482\Doubao\chats\2026-09-26\new-chat\StructMind-Agent`
+- 本地权威仓库：本仓库克隆目录（见 `.git/config` 的 `remote.origin.url`）
 
 ## 3. 底层架构红线（评委必看，绝对不能碰）
 
