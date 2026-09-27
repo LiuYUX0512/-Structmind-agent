@@ -281,6 +281,7 @@ add_para(doc, "作品简介", size=14, bold=True, color=DEEP, align=WD_ALIGN_PAR
 add_para(doc, "面向建筑方案阶段的多智能体协同结构选型与优化工具：输入工程参数即可自动生成多套候选结构方案，完成国标逐条校核、七维量化比选与综合推荐，让工程师在数分钟内获得可溯源、可干预、可导出的寻优结果。", size=11.5, color=INK, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=24)
 
 add_para(doc, "线上 Demo：https://liuyux0512.github.io/-Structmind-agent/", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
+add_para(doc, "源码仓库：https://github.com/LiuYUX0512/-Structmind-agent", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 add_para(doc, "提交日期：2026 年 9 月 28 日", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 add_para(doc, "团队成员：刘宇翔（负责人）、李国扬、吕勇宽、张盛涵", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
 add_para(doc, "所属学院：土木工程 · 指导教师：无", size=11.5, color=DEEP, align=WD_ALIGN_PARAGRAPH.CENTER, east="宋体", after=4)
@@ -384,7 +385,7 @@ add_para(doc, "后续优化方向：①接入 BIM 模型（支持 DXF/Revit 模�
 add_heading(doc, "3. 演示示例", 1)
 
 add_heading(doc, "3.1 访问方式", 2)
-add_para(doc, "访问链接：https://liuyux0512.github.io/-Structmind-agent/。无需登录、无需 API Key（演示模式可直接运行），手机与电脑浏览器均可打开。")
+add_para(doc, "访问链接（在线 Demo）：https://liuyux0512.github.io/-Structmind-agent/。源码仓库：https://github.com/LiuYUX0512/-Structmind-agent。无需登录、无需 API Key（演示模式可直接运行），手机与电脑浏览器均可打开。")
 add_para(doc, "使用步骤：① 打开链接进入首页（默认加载“8 度设防 50 层智能办公楼”示例轨迹）；② 在参数录入区输入建筑面积、层数、跨度、设防烈度、预算等参数；③ 点击“启动方案智能生成”，观察四 Agent 协同推理轨迹；④ 查看三套候选方案及七维比选雷达图；⑤ 查看 Chief 综合推荐、风险提示与置信度；⑥ 点击“15 秒看懂”播放 DAG 电影模式，或悬停能力雷达查看指标溯源。")
 add_para(doc, "测试问题：①“帮我做一个八层办公楼，建筑面积 8000㎡，跨度 8.4 米，设防烈度 7 度”；②“预算收紧到 1.2 亿，帮我重新比选”；③“哪套方案碳排放最低？”")
 add_para(doc, "七维比选口径：造价（元/㎡）、工期（月）、抗震性能（分）、施工难度（分）、可持续性（分）、装配率（%）、碳排放（kgCO₂/㎡）。其中造价、工期、施工难度、碳排放为逆向指标（越低越优），其余为正向指标。")

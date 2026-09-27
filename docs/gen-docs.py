@@ -201,7 +201,8 @@ def gen_tech_doc():
     add_para(doc, "海之子杯 AI 智能体挑战赛 · 西建大校内赛", size=12, align=WD_ALIGN_PARAGRAPH.CENTER)
     add_para(doc, "智构 StructMind · 建筑结构方案优化 AI 智能体", size=20, bold=True, color=TEAL, align=WD_ALIGN_PARAGRAPH.CENTER)
     add_para(doc, "作品简介：面向建筑方案阶段的多 Agent 协同结构选型与优化工具，输入工程参数即可自动生成多套候选结构方案，完成规范逐条校核、七维量化比选与综合推荐，让工程师快速获得可溯源、可干预的寻优结果。", size=11, align=WD_ALIGN_PARAGRAPH.CENTER)
-    add_para(doc, "作品链接：https://liuyux0512.github.io/-Structmind-agent/", size=11, align=WD_ALIGN_PARAGRAPH.CENTER)
+    add_para(doc, "作品链接（在线 Demo）：https://liuyux0512.github.io/-Structmind-agent/", size=11, align=WD_ALIGN_PARAGRAPH.CENTER)
+    add_para(doc, "源码仓库：https://github.com/LiuYUX0512/-Structmind-agent", size=11, align=WD_ALIGN_PARAGRAPH.CENTER)
     add_para(doc, "提交日期：2026 年 9 月 28 日", size=11, align=WD_ALIGN_PARAGRAPH.CENTER)
     doc.add_page_break()
 

@@ -5,13 +5,13 @@
 
 ## 🚀 在线 Demo
 
-| 入口 | 地址 |
-|---|---|
-| **GitHub Pages（主站点，可公开访问）** | https://liuyux0512.github.io/-Structmind-agent/ |
-| 妙搭平台（原部署环境） | https://4m2urftxnpjq0.aiforce.cloud/app/app_17ebqts8axz |
+| 入口 | 地址 | 说明 |
+|---|---|---|
+| **在线 Demo（主入口，推荐）** | https://liuyux0512.github.io/-Structmind-agent/ | 纯前端单页应用，手机/电脑浏览器直接打开，无需安装、无需登录、演示模式无需 API Key |
+| 源码仓库 | https://github.com/LiuYUX0512/-Structmind-agent | main 分支含全部源码与脚本 |
 
-- 纯前端单页应用（SPA），手机/电脑浏览器均可直接打开，无需安装。
-- GitHub Pages 由 `gh-pages` 分支自动发布，push 即更新。
+- 线上主站点由 `gh-pages` 分支发布：源码在 `main`，构建产物在 `gh-pages`，两条链路独立，更新网站需单独推送 `gh-pages`。
+- 本地运行：`npm install && npm run dev` → 打开 http://localhost:5173
 
 ## 🧠 项目定位
 

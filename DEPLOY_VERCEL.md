@@ -1,7 +1,10 @@
-# 智构 StructMind · Vercel 安全代理部署指南（30 分钟上线）
+# 智构 StructMind · Vercel 安全代理部署指南（备用方案 · 当前未启用）
+
+> **当前线上主入口**：https://liuyux0512.github.io/-Structmind-agent/ （GitHub Pages 静态站，演示模式可用）
+> 本文档是**可选进阶方案**：为「真实推理模式」增加服务端代理，使前端不持有 API Key。
+> ⚠️ 若采用本方案，部署后地址形如 `https://<你的项目名>.vercel.app` —— **该地址需你自己部署后才会存在**，仓库中不存在已上线的 `structmind.vercel.app`。
 
 > 目标：前端不再持有 API Key，所有 LLM 请求经 `/api/chat` 服务端代理转发，代理层带请求频率限制。
-> 完成后线上地址形如 `https://structmind.vercel.app`（可用 GitHub 仓库一键导入，**零命令行**）。
 
 ---
 
@@ -85,7 +88,7 @@ src/components/AgentConfigPanel.tsx ← 配置面板：一键切换安全代理
 
 **Q：报 402 / 余额不足？** DeepSeek 账户需充值，Key 本身有效（此前已验证）。
 
-**Q：还想保留 GitHub Pages 旧站？** 可以，两者互不影响：GitHub Pages 是静态站（无代理、演示模式可用）；Vercel 是完整版（代理 + 真实推理）。比赛提交用 Vercel 地址。
+**Q：还想保留 GitHub Pages 旧站？** 可以，两者互不影响：GitHub Pages 是静态站（无代理、演示模式可用），也是**当前竞赛提交使用的地址**；Vercel 是可选完整版（代理 + 真实推理），需自行部署后方可使用。
 
 **Q：想换 Cloudflare Workers？** 备选方案：`api/chat.ts` 逻辑可直接平移到 Worker（改 export 为 `fetch` handler，环境变量同名），wrangler 部署 `workers.dev`。本仓库已按 Vercel 约定组织，切 CF 需小改函数签名。
 
