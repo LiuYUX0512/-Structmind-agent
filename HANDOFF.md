@@ -55,16 +55,22 @@
 3. **不要把 API Key、内部配置、占位符漏进公开产物**；交付前核对是否泄漏。
 4. **同步线上 Demo（关键，勿漏）**：改完源码并 push 到 `main` 后，必须重建并更新 `gh-pages` 分支，否则线上网页看不到你的改动。在本仓库目录执行：
    ```
-   node scripts/build-gh-pages.mjs
-   cd dist/gh-pages
-   git init -q
-   git config user.name "LiuYUX0512"
-   git config user.email "5399301912@163.com"
-   git add -A
+   node scripts/build-gh-pages.mjs      # 产出 dist/gh-pages/（自动替换模板变量 + 生成 404.html）
+   git fetch origin gh-pages:refs/remotes/origin/gh-pages
+   git checkout -B gh-pages-deploy origin/gh-pages
+   cp -r dist/gh-pages/* .              # 覆盖 index.html / assets 等
+   git add index.html 404.html routes.json assets favicon.svg icons.svg
    git commit -m "deploy: sync main"
-   git -c http.proxy=http://127.0.0.1:7890 -c https.proxy=http://127.0.0.1:7890 push --force https://github.com/LiuYUX0512/-Structmind-agent.git HEAD:gh-pages
+   git push origin gh-pages-deploy:gh-pages --force
+   git checkout main
    ```
-   说明：线上 Demo 部署自 `gh-pages` 分支（构建产物），与 `main`（源码）分离，**必须手动重建同步，这是唯一可靠的发布通道**。
+   ⚠️ **「只增不删」铁律（2026-09-28 踩坑后新增）**：
+   - **禁止** `rm -rf assets`、**禁止** `git add -A`（会把旧 hash 资源标记为删除）。
+   - 原因：GitHub Pages 对 `index.html` 设了 `Cache-Control: max-age=600`。用户浏览器若命中 10 分钟内的缓存 HTML，仍会去请求**上一版**的 `assets/index-<旧hash>.js`。这些文件一旦被删就返回 404 → React 永远挂载不上 → 页面停在 `index.html` 内联的加载动画上**一直转圈**（当天真实故障，用户报「网页又进不去了」）。
+   - 构建产物文件名自带 hash，新旧天然不冲突，**保留旧文件零成本**，却能兼容所有缓存中的旧 HTML。
+   - 顺带：`404.html` 必须一并更新（本次发现线上 404.html 曾长期停留在更早的构建）。
+
+   说明：线上 Demo 部署自 `gh-pages` 分支（构建产物），与 `main`（源码）分离，**必须手动重建同步，这是唯一可靠的发布通道**。发布后务必**实测线上**（打开链接确认能渲染、关键功能可用），不要只看 push 成功。
 5. 验收标准：可正常复现运行的 Demo + 完整参赛材料 + 所有改动已同步回仓库。
 
 ---
