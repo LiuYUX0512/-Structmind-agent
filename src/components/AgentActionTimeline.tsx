@@ -367,7 +367,7 @@ const AgentActionTimeline = forwardRef<AgentActionTimelineRef, AgentActionTimeli
         </div>
         {viewMode === 'map' && (
           <span className="font-mono text-[9px] text-muted-foreground/60">
-            CODE → ARCHITECT 打回会显示红色弧线
+            CODE → ARCHITECT 打回显示红色弧线 · 右上「全屏」可放大（录屏推荐）
           </span>
         )}
       </div>
