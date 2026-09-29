@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { capabilityClient, scopedStorage, logger } from '@lark-apaas/client-toolkit-lite';
 import { toast } from 'sonner';
 import { Download, Upload, AlertTriangle, Presentation, FileText, HelpCircle, History, GitCompareArrows } from 'lucide-react';
@@ -18,13 +18,11 @@ import AgentConfigPanel from '@/components/AgentConfigPanel';
 import HeroSection from './sections/HeroSection';
 import ParamsSection from './sections/ParamsSection';
 import SchemesSection from './sections/SchemesSection';
-import ComparisonSection from './sections/ComparisonSection';
 import MetacognitionPanel from '@/components/MetacognitionPanel';
 import MemoryPanel from '@/components/MemoryPanel';
 import DagMovieMode from '@/components/DagMovieMode';
 import { HIGHLIGHT_CASE_LOG, HIGHLIGHT_CASE_METRICS } from '@/data/highlight-case';
 import { DebatePanel } from '@/components/DebatePanel';
-import ChatSection from './sections/ChatSection';
 import { getLlmConfig, streamLlmChat } from '@/components/ApiKeyModal';
 import type {
   CivilStructQaOneInput,
@@ -79,6 +77,25 @@ import {
   type IOptimizationGoal,
 } from '@/agent';
 import { computeSchemeScore } from '@/agent/scoring';
+
+// ============ 首屏瘦身：重依赖组件按需加载 ============
+// 背景：GitHub Pages 在国内访问被限速，首屏 JS 每多 1MB 就多好几秒白屏/转圈。
+// echarts 只被 ComparisonSection 使用，react-markdown 只被 ChatSection 使用，
+// 二者都拆成独立 chunk —— 首屏包显著变小，Hero/参数区能先渲染出来。
+const ComparisonSection = lazy(() => import('./sections/ComparisonSection'));
+const ChatSection = lazy(() => import('./sections/ChatSection'));
+
+/** 懒加载区块的占位：保持与正式区块相近的垂直节奏，避免加载完成后版式跳动 */
+function SectionFallback() {
+  return (
+    <div className="w-full py-14 md:py-16" aria-hidden="true">
+      <div className="mx-auto max-w-[1600px] px-6">
+        <div className="h-5 w-36 rounded bg-muted/40" />
+        <div className="mt-4 h-32 rounded-md border border-border/40 bg-muted/20" />
+      </div>
+    </div>
+  );
+}
 
 const STORAGE_KEY_PARAMS = '__structopt_project_params';
 const STORAGE_KEY_WEIGHTS = '__structopt_weights';
@@ -1524,23 +1541,25 @@ ${dis || '- （待补充）'}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.2 }}
         >
-          <ComparisonSection
-             schemes={schemes}
-             recommendation={recommendation}
-             isRecommending={isGeneratingRec}
-             recommendationContent={recommendationContent}
-             selectedSchemeId={selectedSchemeId}
-             weights={weights}
-             projectParams={projectParams}
-             onOptimize={handleOptimize}
-             isOptimizing={isOptimizing}
-             optimizationResult={optimizationResult}
-             optimizationSuggestions={optimizeSuggestions}
-              onStartOptimization={handleStartOptimization}
-              isAutoOptimizing={isAutoOptimizing}
-              lockedParams={lockedParams}
-              codeChecks={lastCodeChecks}
-            />
+          <Suspense fallback={<SectionFallback />}>
+            <ComparisonSection
+               schemes={schemes}
+               recommendation={recommendation}
+               isRecommending={isGeneratingRec}
+               recommendationContent={recommendationContent}
+               selectedSchemeId={selectedSchemeId}
+               weights={weights}
+               projectParams={projectParams}
+               onOptimize={handleOptimize}
+               isOptimizing={isOptimizing}
+               optimizationResult={optimizationResult}
+               optimizationSuggestions={optimizeSuggestions}
+                onStartOptimization={handleStartOptimization}
+                isAutoOptimizing={isAutoOptimizing}
+                lockedParams={lockedParams}
+                codeChecks={lastCodeChecks}
+              />
+          </Suspense>
         </motion.div>
         <MetacognitionPanel
           metacognition={metacognition}
@@ -1548,16 +1567,18 @@ ${dis || '- （待补充）'}
           risks={lastAdvice?.risks}
         />
         <MemoryPanel logs={actionLog} />
-        <ChatSection
-          messages={chatMessages}
-          isLoading={isChatLoading}
-          onSendMessage={handleSendMessage}
-          params={projectParams}
-          schemes={schemes}
-          recommendedSchemeId={recommendation?.schemeId}
-          currentIntent={currentIntent}
-          onOpenConfig={() => setConfigOpen(true)}
-        />
+        <Suspense fallback={<SectionFallback />}>
+          <ChatSection
+            messages={chatMessages}
+            isLoading={isChatLoading}
+            onSendMessage={handleSendMessage}
+            params={projectParams}
+            schemes={schemes}
+            recommendedSchemeId={recommendation?.schemeId}
+            currentIntent={currentIntent}
+            onOpenConfig={() => setConfigOpen(true)}
+          />
+        </Suspense>
       </main>
 
       {/* Blueprint Title Block Footer - 工程图签栏 */}

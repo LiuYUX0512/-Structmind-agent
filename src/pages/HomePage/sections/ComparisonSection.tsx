@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react';
 import ReactECharts from 'echarts-for-react';
 import CountUpOnView from '@/components/CountUpOnView';
+import CounterfactualPanel from '@/components/CounterfactualPanel';
 import type { EChartsOption } from 'echarts';
 import { motion } from 'framer-motion';
 import {
@@ -1985,6 +1986,25 @@ function ComparisonSection({
             </div>
           </CardContent>
         </Card>
+
+        {/* What-if 反事实推演：滑杆实时推演（引擎 counterfactual.ts 的第一个直接 UI 消费者） */}
+        {schemes.length > 0 &&
+          (() => {
+            // projectParams 在「直接进对比分析」的链路上可能是 null（参数表单未提交），
+            // 此时退回方案自带的参数快照 evaluatedAt（P0-3 起每套方案都带）。
+            const cfParams = projectParams ?? schemes[0]?.evaluatedAt ?? null;
+            if (!cfParams) return null;
+            return (
+              <div className="mt-4">
+                <CounterfactualPanel
+                  params={cfParams}
+                  schemeIds={schemes.map((s) => s.id)}
+                  systemNames={Object.fromEntries(schemes.map((s) => [s.id, s.name]))}
+                  recommendationId={recommendation?.schemeId ?? null}
+                />
+              </div>
+            );
+          })()}
       </div>
     </section>
   );
